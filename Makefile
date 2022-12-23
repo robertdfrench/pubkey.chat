@@ -4,7 +4,8 @@ all: \
 	/usr/local/bin/akc \
 	/usr/local/bin/readmail \
 	/usr/local/bin/writemail \
-	/usr/local/bin/invitemail
+	/usr/local/bin/invitemail \
+	/usr/local/bin/pkc-shell
 
 /etc/doas.conf: doas.conf
 	install -m 644 -o root -g wheel doas.conf /etc/doas.conf
@@ -24,3 +25,6 @@ all: \
 
 /usr/local/bin/invitemail: invitemail
 	install -m 755 -o root -g wheel invitemail /usr/local/bin/invitemail
+
+/usr/local/bin/pkc-shell: pkc-shell
+	install -m 755 -o root -g wheel pkc-shell /usr/local/bin/pkc-shell
