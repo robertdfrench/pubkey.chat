@@ -3,6 +3,6 @@ set -e
 recipient=$1
 logger "writemail"
 if ! id "${recipient}" > /dev/null; then
-	doas -u root /usr/local/bin/invitemail "${recipient}"
+	doas -u root /usr/local/bin/pkc-invite "${recipient}"
 fi
 mail -s "message" "${recipient}"

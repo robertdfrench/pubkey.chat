@@ -90,4 +90,4 @@ Match Group github
 	X11Forwarding no
 	AllowTcpForwarding no
 	PermitTTY no
-	ForceCommand /usr/local/bin/shellmail
+	ForceCommand /usr/local/bin/pkc-shell

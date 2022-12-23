@@ -2,9 +2,9 @@ all: \
 	/etc/doas.conf \
 	/etc/ssh/sshd_config \
 	/usr/local/bin/akc \
-	/usr/local/bin/readmail \
-	/usr/local/bin/writemail \
-	/usr/local/bin/invitemail \
+	/usr/local/bin/pkc-read \
+	/usr/local/bin/pkc-write \
+	/usr/local/bin/pkc-invite \
 	/usr/local/bin/pkc-shell
 
 /etc/doas.conf: doas.conf
@@ -17,14 +17,14 @@ all: \
 /usr/local/bin/akc: akc
 	install -m 755 -o root -g wheel akc /usr/local/bin/akc
 
-/usr/local/bin/readmail: readmail
-	install -m 755 -o root -g wheel readmail /usr/local/bin/readmail
+/usr/local/bin/pkc-read: pkc-read
+	install -m 755 -o root -g wheel pkc-read /usr/local/bin/pkc-read
 
-/usr/local/bin/writemail: writemail
-	install -m 755 -o root -g wheel writemail /usr/local/bin/writemail
+/usr/local/bin/pkc-write: pkc-write
+	install -m 755 -o root -g wheel pkc-write /usr/local/bin/pkc-write
 
-/usr/local/bin/invitemail: invitemail
-	install -m 755 -o root -g wheel invitemail /usr/local/bin/invitemail
+/usr/local/bin/pkc-invite: pkc-invite
+	install -m 755 -o root -g wheel pkc-invite /usr/local/bin/pkc-invite
 
 /usr/local/bin/pkc-shell: pkc-shell
 	install -m 755 -o root -g wheel pkc-shell /usr/local/bin/pkc-shell

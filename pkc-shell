@@ -1,2 +1,15 @@
 #!/bin/ksh
-env
+set -e
+set -A values $SSH_ORIGINAL_COMMAND
+case ${values[0]} in
+	read)
+		/usr/local/bin/pkc-read
+		;;
+	write)
+		/usr/local/bin/pkc-write ${values[1]}
+		;;
+	*)
+		echo "Unsupported command"
+		false
+		;;
+esac
