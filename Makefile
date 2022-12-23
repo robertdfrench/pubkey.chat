@@ -1,7 +1,7 @@
 all: \
 	/etc/doas.conf \
 	/etc/ssh/sshd_config \
-	/usr/local/bin/akc \
+	/usr/local/bin/pkc-keys \
 	/usr/local/bin/pkc-read \
 	/usr/local/bin/pkc-write \
 	/usr/local/bin/pkc-invite \
@@ -14,8 +14,8 @@ all: \
 	install -m 644 -o root -g wheel sshd_config /etc/ssh/sshd_config
 	rcctl restart sshd
 
-/usr/local/bin/akc: akc
-	install -m 755 -o root -g wheel akc /usr/local/bin/akc
+/usr/local/bin/pkc-keys: pkc-keys
+	install -m 755 -o root -g wheel pkc-keys /usr/local/bin/pkc-keys
 
 /usr/local/bin/pkc-read: pkc-read
 	install -m 755 -o root -g wheel pkc-read /usr/local/bin/pkc-read
