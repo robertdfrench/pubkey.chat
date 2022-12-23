@@ -32,17 +32,10 @@ resource "vultr_dns_domain" "root" {
   domain = "pubkey.chat"
 }
 
-data "vultr_os" "openbsd" {
-  filter {
-    name   = "name"
-    values = ["OpenBSD 7.2 x64"]
-  }
-}
-
 resource "vultr_instance" "atl" {
   plan        = "vhp-1c-1gb-intel"
   region      = "atl"
-  os_id       = data.vultr_os.openbsd.id
+  snapshot_id = "c64844c8-862d-4b75-88e1-62d8d2e5c6a8"
   label       = "atl"
   tags        = ["infrastructure"]
   hostname    = "atl.pubkey.chat"
@@ -54,4 +47,9 @@ resource "vultr_dns_record" "www" {
   name   = "www"
   data   = vultr_instance.atl.main_ip
   type   = "A"
+}
+
+resource "vultr_ssh_key" "root" {
+  name    = "root"
+  ssh_key = file("deploy_key.pub")
 }
