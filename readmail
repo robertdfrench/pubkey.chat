@@ -1,0 +1,3 @@
+#!/bin/ksh
+logger "readmail"
+echo "\nw" | mail -N

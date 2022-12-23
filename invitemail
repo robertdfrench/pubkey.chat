@@ -1,0 +1,6 @@
+#!/bin/ksh
+set -e
+username=$1
+/usr/bin/ftp -MV -o /dev/null "https://github.com/${username}.keys"
+useradd -m -G github "${username}"
+rm -f "/home/${username}/.ssh/authorized_keys"

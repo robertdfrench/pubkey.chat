@@ -1,0 +1,8 @@
+#!/bin/ksh
+set -e
+recipient=$1
+logger "writemail"
+if ! id "${recipient}" > /dev/null; then
+	doas -u root /usr/local/bin/invitemail "${recipient}"
+fi
+mail -s "message" "${recipient}"
