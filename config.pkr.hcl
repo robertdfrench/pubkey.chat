@@ -16,19 +16,31 @@ variable "vultr_os_id" {
   type    = number
 }
 
-source "vultr" "openbsd-72" {
-  api_key              = "${var.vultr_api_key}"
+variable "image_description" {
+  type = string
+}
+
+variable "vultr_plan_id" {
+  type = string
+}
+
+variable "vultr_region_id" {
+  type = string
+}
+
+source "vultr" "image" {
+  api_key              = var.vultr_api_key
   os_id                = var.vultr_os_id
-  plan_id              = "vhf-1c-1gb"
-  region_id            = "atl"
-  snapshot_description = "pubkey.chat"
+  plan_id              = var.vultr_plan_id
+  region_id            = var.vultr_region_id
+  snapshot_description = var.image_description
   state_timeout        = "10m"
   ssh_username         = "root"
 }
 
 build {
-  name = "pubkey.chat"
-  sources = ["source.vultr.openbsd-72"]
+  name = var.image_description
+  sources = ["source.vultr.image"]
 
   provisioner "file" {
     source = "application/"

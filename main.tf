@@ -1,52 +1,40 @@
-terraform {
-  cloud {
-    organization = "robertdfrench"
-
-    workspaces {
-      name = "pubkey_chat"
-    }
-  }
-  required_providers {
-    vultr = {
-      source  = "vultr/vultr"
-      version = "2.12.0"
-    }
-  }
-}
-
-variable "vultr_api_key" {
+variable "image_description" {
   type = string
-}
-
-provider "vultr" {
-  api_key = var.vultr_api_key
-}
-
-resource "null_resource" "example" {
-  triggers = {
-    value = "A example resource that does nothing!"
-  }
 }
 
 resource "vultr_dns_domain" "root" {
   domain = "pubkey.chat"
 }
 
-resource "vultr_instance" "atl" {
-  plan        = "vhp-1c-1gb-intel"
-  region      = "atl"
-  snapshot_id = "c64844c8-862d-4b75-88e1-62d8d2e5c6a8"
-  label       = "atl"
+variable "vultr_plan_id" {
+  type = string
+}
+
+data "vultr_snapshot" "image" {
+  filter {
+    name = "description"
+    values = [var.image_description]
+  }
+}
+
+resource "vultr_instance" "regional" {
+  for_each    = toset( ["atl", "ewr", "sjc"] )
+  plan        = var.vultr_plan_id
+  region      = each.key
+  snapshot_id = data.vultr_snapshot.image.id
+  label       = each.key
   tags        = ["infrastructure"]
-  hostname    = "atl.pubkey.chat"
+  hostname    = "${each.key}.pubkey.chat"
   enable_ipv6 = true
+  ssh_key_ids = [vultr_ssh_key.root.id]
 }
 
 resource "vultr_dns_record" "www" {
-  domain = vultr_dns_domain.root.id
-  name   = "www"
-  data   = vultr_instance.atl.main_ip
-  type   = "A"
+  for_each = vultr_instance.regional
+  domain   = vultr_dns_domain.root.id
+  name     = split(".", each.value.hostname)[0]
+  data     = each.value.main_ip
+  type     = "A"
 }
 
 resource "vultr_ssh_key" "root" {
