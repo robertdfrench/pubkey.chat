@@ -10,6 +10,10 @@ variable "vultr_plan_id" {
   type = string
 }
 
+variable "vultr_principal_region" {
+  type = string
+}
+
 data "vultr_snapshot" "image" {
   filter {
     name = "description"
@@ -18,7 +22,7 @@ data "vultr_snapshot" "image" {
 }
 
 resource "vultr_instance" "regional" {
-  for_each    = toset( ["atl", "ewr", "sjc", "mex"] )
+  for_each    = toset( ["atl", "ewr"] )
   plan        = var.vultr_plan_id
   region      = each.key
   snapshot_id = data.vultr_snapshot.image.id
@@ -42,4 +46,14 @@ resource "vultr_dns_record" "actual_www" {
   name     = "www"
   data     = each.value.main_ip
   type     = "A"
+}
+
+resource "vultr_instance" "build" {
+  plan        = "vc2-2c-4gb"
+  region      = var.vultr_principal_region
+  snapshot_id = data.vultr_snapshot.image.id
+  label       = "build.infra.pubkey.chat"
+  tags        = ["infrastructure"]
+  hostname    = "build.infra.pubkey.chat"
+  enable_ipv6 = true
 }

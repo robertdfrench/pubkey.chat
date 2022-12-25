@@ -2,6 +2,7 @@ all: build/image_description.txt config.json build/tfinit
 	terraform apply \
 		-var "vultr_api_key=${VULTR_API_KEY}" \
 		-var "image_description=`cat build/image_description.txt`" \
+		-var "vultr_principal_region=`jq -r '.vultr.principal_region' config.json`" \
 		-var "vultr_plan_id=`jq -r '.vultr.plan' config.json`"
 
 build/tfinit: init.tf build/.dir
