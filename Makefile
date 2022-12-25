@@ -9,7 +9,7 @@ build/tfinit: init.tf build/.dir
 	touch $@
 
 build/image_description.txt: build/vultr_os_id.txt build/packer.init \
-	config.pkr.hcl config.json
+	config.pkr.hcl config.json application/
 	image_description=`date "+pubkey.chat-%s"` \
 		&& packer build \
 			-var "vultr_os_id=`cat build/vultr_os_id.txt`" \

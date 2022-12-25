@@ -1,6 +1,7 @@
 all: \
 	/etc/doas.conf \
 	/etc/ssh/sshd_config \
+	/root/.ssh/authorized_keys \
 	/usr/local/bin/pkc-keys \
 	/usr/local/bin/pkc-read \
 	/usr/local/bin/pkc-write \
@@ -14,6 +15,9 @@ all: \
 	install -m 644 -o root -g wheel sshd_config /etc/ssh/sshd_config
 	rcctl restart sshd
 
+/root/.ssh/authorized_keys: deploy_key.pub
+	install -m 600 -o root -g wheel deploy_key.pub /root/.ssh/authorized_keys
+
 /usr/local/bin/pkc-keys: pkc-keys
 	install -m 755 -o root -g wheel pkc-keys /usr/local/bin/pkc-keys
 
@@ -24,6 +28,7 @@ all: \
 	install -m 755 -o root -g wheel pkc-write /usr/local/bin/pkc-write
 
 /usr/local/bin/pkc-invite: pkc-invite
+	groupadd github
 	install -m 755 -o root -g wheel pkc-invite /usr/local/bin/pkc-invite
 
 /usr/local/bin/pkc-shell: pkc-shell
