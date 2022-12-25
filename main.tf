@@ -57,3 +57,10 @@ resource "vultr_instance" "build" {
   hostname    = "build.infra.pubkey.chat"
   enable_ipv6 = true
 }
+
+resource "vultr_dns_record" "build" {
+  domain   = vultr_dns_domain.root.id
+  name     = "build"
+  data     = vultr_instance.build.main_ip
+  type     = "A"
+}
