@@ -1,5 +1,5 @@
 {
   "label" : "GitHub Actions Runner",
-  "hostname": "runner.infra.pubkey.chat",
+  "hostname": "runner.invalid",
   "tags": ["out-of-band"]
 }
