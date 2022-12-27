@@ -1,4 +1,4 @@
-all: pubkey regtok instance
+all: pubkey instance
 
 build/cloud-init.sh: build/registration_token.json cloud-init.sh
 	$(info [Script] Compile Cloud Init Script)
@@ -76,6 +76,10 @@ build/repo_path.txt: build/.dir
 		| sed 's/\.git//' \
 		> $@
 
+build/runner_id.txt: build/runners.json
+	$(info [Runner] Identify Runner)
+	@jq -r '.runners[] | select(.name == "runner").id' $< > $@
+
 build/runners.json: build/repo_path.txt
 	$(info [Runner] Fetch Existing Runners)
 	@curl -s \
@@ -107,6 +111,7 @@ clean:
 	$(info [All] Destroy any existing infrastructure)
 	@(! $(MAKE) instance_exists) || $(MAKE) instance_destroy
 	@(! $(MAKE) pubkey_exists) || $(MAKE) pubkey_destroy
+	@(! $(MAKE) runner_exists) || $(MAKE) runner_destroy
 	@rm -rf build
 
 instance:
@@ -165,4 +170,12 @@ pubkey_exists:
 runner_exists: build/runners.json
 	$(info [Runner] Assert That the Runner Exists)
 	@jq -e '.runners[] | select(.name == "runner") | length > 0' $<
-	@rm -f build/runners.json
+
+runner_destroy: build/runner_id.txt build/repo_path.txt
+	$(info [Runner] Delete the Runner)
+	@curl -s \
+		-X DELETE \
+		-H "Accept: application/vnd.github+json" \
+		-H "Authorization: Bearer ${GITHUB_TOKEN}"\
+		-H "X-GitHub-Api-Version: 2022-11-28" \
+		https://api.github.com/repos/`cat build/repo_path.txt`/actions/runners/`cat build/runner_id.txt`
