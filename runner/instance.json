@@ -1,5 +1,6 @@
 {
   "label" : "GitHub Actions Runner",
   "hostname": "runner.invalid",
+  "os_id": 1743,
   "tags": ["out-of-band"]
 }
