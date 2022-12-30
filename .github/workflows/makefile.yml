@@ -16,3 +16,5 @@ jobs:
 
     - name: Install dependencies
       run: make
+      env:
+        VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
