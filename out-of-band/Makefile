@@ -1,4 +1,4 @@
-all: pubkey instance
+all: pubkey instance domain
 
 build/cloud-init.sh: build/registration_token.json cloud-init.sh
 	$(info [Script] Compile Cloud Init Script)
