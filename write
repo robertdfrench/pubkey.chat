@@ -24,9 +24,6 @@ NAMESPACE = "wmap@wmap.dev"
 def main():  # pragma: no cover
     """
     Application entrypoint.
-
-    QA note: This function is not covered in unit testing as it is part of the
-    user interface.
     """
     http_method = os.getenv('REQUEST_METHOD', 'GET')
     if http_method != "POST":
@@ -52,6 +49,14 @@ def verified_upload(name):
         for block in iter(lambda: f.read(4096), b""):
             sha256.update(block)
     hd = sha256.hexdigest()
+    destination = f"/var/www/htdocs/wmap/{hd}.wmap"
+    if os.path.isfile(destination):
+        # This content already exists
+        print("Status: 409 Conflict")
+        print(f"Location: /wmap/{hd}.wmap")
+        print("Content-Type: text/plain\n")
+        print("An object with this hash already exists.")
+        return
     with open('/var/www/facades.txt', 'r') as f:
         facades = {x.rstrip(): True for x in f}
         index = hd[0]
@@ -61,7 +66,7 @@ def verified_upload(name):
             print("Content-Type: text/plain\n")
             print("Post your message with the wmap client.")
             return
-    shutil.copy(name, f"/var/www/htdocs/wmap/{hd}.wmap")
+    shutil.copy(name, destination)
     print("Status: 201 Created")
     print(f"Location: /wmap/{hd}.wmap")
     print("Content-Type: text/plain\n")
