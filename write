@@ -52,6 +52,15 @@ def verified_upload(name):
         for block in iter(lambda: f.read(4096), b""):
             sha256.update(block)
     hd = sha256.hexdigest()
+    with open('/var/www/facades.txt', 'r') as f:
+        facades = {x.rstrip(): True for x in f}
+        index = hd[0]
+        if index not in facades:
+            print("Status: 308 Permanent Redirect")
+            print(f"Location: https://{index}.pubkey.chat/write")
+            print("Content-Type: text/plain\n")
+            print("Post your message with the wmap client.")
+            return
     shutil.copy(name, f"/var/www/htdocs/wmap/{hd}.wmap")
     print("Status: 201 Created")
     print(f"Location: /wmap/{hd}.wmap")
