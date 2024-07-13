@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Copyright 2024 Robert D. French
+import argparse
+from enum import auto
+import base64
+from dataclasses import dataclass
+from enum import Enum
+import fcntl
+import hashlib
+import json
+from typing import List
+import os
+from pathlib import Path
+import re
+from urllib import request
+import shutil
+import subprocess
+import sys
+import tempfile
+import typing
+
+
+NAMESPACE = "wmap@pubkey.chat"
+
+
+def main():  # pragma: no cover
+    """
+    Application entrypoint.
+
+    This is the application entrypoint (called at the end of this file in
+    the traditional python fashion). It assembles the command line interface
+    via argparse, and then passes control to one of the subcommand functions:
+    sign, verify, or extract.
+
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    parser = argparse.ArgumentParser(
+            description='wmap.py: A tool to sign or verify files.')
+    subparsers = parser.add_subparsers(dest='command', help='sub-command help')
+
+    # Subparser for the 'sign' command
+    parser_sign = subparsers.add_parser(
+            'sign', help='Sign a file')
+    parser_sign.add_argument(
+            'username', type=str, help='GitHub username')
+    parser_sign.add_argument(
+            'key', type=str, help='SSH private key to use for signing')
+    parser_sign.add_argument(
+            'file', type=str, help='File to be signed')
+
+    # Subparser for the 'verify' command
+    parser_verify = subparsers.add_parser(
+            'verify', help='Verify a signed file')
+    parser_verify.add_argument(
+            'file', type=str, help='Signed file to be verified')
+
+    # Subparser for the 'extract' command
+    parser_extract = subparsers.add_parser(
+            'extract', help='Extract a signed file')
+    parser_extract.add_argument(
+            '--skip-validation', action='store_true',
+            help='Something is very wrong if you need to use this flag')
+    parser_extract.add_argument(
+            'file', type=str, help='Signed file to be extracted')
+
+    args = parser.parse_args()
+
+    if args.command == 'sign':
+        sign(args.username, args.key, args.file)
+    elif args.command == 'verify':
+        verify(args.file)
+    elif args.command == 'extract':
+        extract(args.file, args.skip_validation)
+    else:
+        parser.print_help()
+
+
+def sign(username: str, key: str, file: str):  # pragma: no cover
+    """
+    Produce a signed, WMAP-formatted version of the input file.
+
+    Parameters:
+    - username: the GitHub username of the author of `file`
+    - key: the path to the ssh private key of the author. The corresponding
+      public key must be installed on the author's GitHub account.
+    - file: the path to the file being signed
+
+    Upon success, a WMAP-formatted file called `file`.wmap will be created in
+    the same directory as `file`.
+    """
+    profile = Profile(username)
+    private_key = PrivateKey(profile, key)
+    private_key.sign(file)
+    message = Message.from_signed_file(profile, file)
+    message.dump(file + ".wmap")
+    os.remove(file + ".sig")
+
+
+def verify(file: str):  # pragma: no cover
+    """
+    Verify the integrity of a WMAP-formatted file.
+
+    Parameters:
+    - file: the path to a WMAP-formatted file
+
+    If the file cannot be verified, this function will cause wmap to exit
+    nonzero.
+
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    message = Message.load(file)
+    message.signature.dump(file + ".sig")
+    valid = message.profile.verify_signed_data(message.body, file + ".sig")
+    os.remove(file + ".sig")
+    return valid
+
+
+def extract(file: str, skip_validation: bool = False):  # pragma: no cover
+    """
+    Verify, decode, and print the body of a WMAP-formatted file.
+
+    Parameters:
+    - file: the path to a WMAP-formatted file
+    - skip_validation: allow wmap to extract the body from an invalid file.
+
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    if not skip_validation:
+        verify(file)
+    message = Message.load(file)
+    print(str(message.body, 'utf-8'))
+
+
+class Algorithm(Enum):
+    """
+    Allowable algorithms for SSH signing keys.
+    """
+    RSA = auto()
+    ED25519 = auto()
+
+    @classmethod
+    def parse(cls, string: str) -> 'Algorithm':
+        """
+        Attempt to parse a string into one of these Algorithm enum instances.
+
+        Parameters:
+        - string: a string which may or may not be a valid SSH signing
+          algorithm.
+
+        Raises:
+        - Exception: if the string does not match an allowed algorithm.
+        """
+        if string == "ssh-rsa":
+            return cls.RSA
+        elif string == "ssh-ed25519":
+            return cls.ED25519
+        else:
+            raise Exception("Unknown ssh key algorithm")
+
+    def __str__(self):
+        if self == Algorithm.RSA:
+            return "ssh-rsa"
+        if self == Algorithm.ED25519:
+            return "ssh-ed25519"
+
+
+@dataclass
+class AuthorizedKey:
+    """
+    Representation of an Authorized Key entry, as seen in an
+    ~/.ssh/authorized_keys file or on a user's GitHub profile.
+    """
+    algorithm: Algorithm
+    material: str
+    comment: str
+
+    @classmethod
+    def parse(cls, string: str) -> 'AuthorizedKey':
+        """
+        Parse an authorized keys entry into its constituent parts. Such entries
+        take the following form:
+
+            ssh-rsa ABC...123 username@example.com (other comments)
+
+        Parameters:
+        - string: a string which ought to be a normal-looking authorized keys
+          entry.
+        """
+        parts = string.split()
+        algorithm = Algorithm.parse(parts[0])
+        return cls(algorithm, parts[1], " ".join(parts[2:]))
+
+    def into_allowed_signer(self, profile: 'Profile') -> str:
+        """
+        Convert this authorized keys entry into an ALLOWED SIGNERS entry. Such
+        records take the following form:
+
+            username namespacs="wmap@wmap.dev" ssh-rsa ABC...123
+
+        More information on ALLOWED SIGNERS can be found in the `ssh-keygen(1)`
+        manual page.
+
+        Parameters:
+        - profile: the profile of the GitHub user for whom we'd like to build
+          the ALLOWED SIGNERS record.
+        """
+        principal = profile.username
+        algorithm = str(self.algorithm)
+        material = self.material
+        return f"{principal} namespaces=\"{NAMESPACE}\" {algorithm} {material}"
+
+
+@dataclass
+class Profile:
+    """
+    The GitHub profile associated with `username`
+    """
+    username: str
+
+    def url(self) -> str:
+        """URL for this user's github profile"""
+        return f"https://github.com/{self.username}"
+
+    def authorized_keys_url(self) -> str:
+        """URL for this user's ssh public keys"""
+        return self.url() + ".keys"
+
+    def authorized_keys(self) -> List[AuthorizedKey]:
+        """
+        Grab the user's Authorized Keys from GitHub, transforming each of them
+        into an AuthorizedKey object.
+        """
+        with request.urlopen(self.authorized_keys_url()) as response:
+            lines = response.read().decode().splitlines()
+            return [AuthorizedKey.parse(line) for line in lines]
+
+    def allowed_signers(self) -> List[str]:
+        """
+        Transform each Authorized Key into an ALLOWED SIGNERS record
+
+        More information on ALLOWED SIGNERS can be found in the `ssh-keygen(1)`
+        manual page.
+        """
+        return [k.into_allowed_signer(self) for k in self.authorized_keys()]
+
+    def verify_signed_data(self, data: bytes, signature_path: str) -> bool:
+        """
+        Check whether we have a valid signature for `data` from the current
+        GitHub user.
+
+        Parameters:
+        - data: the bytes which were signed
+        - signature_path: a path to the signature file created by ssh-keygen
+
+        Returns true if the signature matches, false if not.
+        """
+        with tempfile.NamedTemporaryFile() as asf:
+            signers = "\n".join(self.allowed_signers()) + "\n"
+            asf.write(bytes(signers, 'utf-8'))
+            asf.flush()
+            results = subprocess.run([
+                'ssh-keygen', '-Y', 'verify',
+                '-f', asf.name,
+                '-I', self.username,
+                '-n', NAMESPACE,
+                '-s', signature_path
+            ], input=data, capture_output=True)
+            return results.returncode == 0
+
+    def __str__(self) -> str:
+        return self.username
+
+
+@dataclass
+class PrivateKey:
+    """
+    An SSH Private Key for the GitHub user identified by the `profile` object.
+    """
+    profile: Profile
+    path: str
+
+    def sign(self, file: str):
+        """
+        Use this private key to sign the contents of `file`.
+
+        Parameters:
+        - file: the file (on disk) which should be signed
+
+        Upon success, the signature will be stored in `file`.sig.
+        """
+        subprocess.run([
+            'ssh-keygen', '-Y', 'sign',
+            '-f', self.path,
+            '-n', NAMESPACE,
+            file
+        ], check=True)
+
+
+@dataclass
+class Signature:
+    """
+    The output of ssh-keygen -Y sign
+    """
+    content: str
+
+    @classmethod
+    def load(cls, path: str) -> 'Signature':
+        """
+        Load an SSH signature from a file
+
+        Parameters:
+        - path: path to an SSH signature file
+
+        The SSH signature is stored on disk in a format determined by OpenSSH.
+        This format is line-oriented, which is tricky to work with in a JSON
+        document. As such, we choose to work with a base64-encoded
+        representation of this signature instead.
+        """
+        with open(path) as f:
+            raw_text = f.read()
+            content = str(base64.b64encode(bytes(raw_text, 'utf-8')), 'utf-8')
+            return cls(content)
+
+    def dump(self, path: str):
+        """
+        Write an SSH signature to disk,
+
+        Parameters:
+        - path: the path where the SSH signature should be written
+
+        Since the SSH signature in a WMAP file (and in this object) is in
+        base64, we need to decode it before writing it to disk so that it
+        matches the format which ssh-keygen expects.
+        """
+        with open(path, 'w') as f:
+            decoded = str(base64.b64decode(self.content), 'utf-8')
+            f.write(decoded)
+
+    def __str__(self) -> str:
+        return self.content
+
+
+@dataclass
+class Message:
+    """
+    A signed copy of the original content, which can be shared with and
+    validated by anyone.
+    """
+    profile: Profile
+    body: bytes
+    signature: Signature
+
+    @classmethod
+    def from_signed_file(cls, profile: Profile, path: str) -> 'Message':
+        """
+        Create a Message from a file and its signature.
+
+        Parameters:
+        - profile: the GitHub profile of the user who signed this document
+        - path: path to the document which was signed
+
+        Assumptions:
+        The document referenced by `path` should have been signed (using wmap)
+        prior to calling this method. In particular, an OpenSSH-formatted
+        signature file should exist on disk at `path`.sig.
+        """
+        with open(path, 'rb') as f:
+            body = f.read()
+        signature = Signature.load(path + ".sig")
+        return cls(profile, body, signature)
+
+    @classmethod
+    def load(cls, path: str) -> 'Message':
+        """
+        Load an existing JSON-formatted WMAP message from disk.
+
+        Parameters:
+        - path: path to the JSON-formatted WMAP message
+        """
+        with open(path) as f:
+            d = json.load(f)
+            profile = Profile(d['profile'])
+            signature = Signature(d['signature'])
+            body = base64.b64decode(d['body'])
+            return cls(profile, body, signature)
+
+    def into_dict(self) -> dict[str, str]:
+        """
+        Convert this object into a python dictionary, and convert each of its
+        fields into their string representation.
+        """
+        return {
+            'profile': str(self.profile),
+            'body': str(base64.b64encode(self.body), 'utf-8'),
+            'signature': str(self.signature)
+        }
+
+    def dump(self, path: str):
+        """
+        Store this message on disk.
+
+        Parameters:
+        - path: path on disk where this JSON-formatted WMAP message should be
+          written.
+        """
+        with open(path, 'w') as f:
+            json.dump(self.into_dict(), f)
+
+
+def cgi_main():  # pragma: no cover
+    """
+    Web application entrypoint. This function expects that the program is being
+    executed by web server once per request.
+    """
+    try:
+        method = os.getenv('REQUEST_METHOD')
+        path = os.getenv('DOCUMENT_URI')
+        os.chdir('/var/www')
+        with open('facades.txt') as f:
+            facades = [x.rstrip() for x in f]
+        response = Application(method, path, sys.stdin, facades).run()
+        print(response)
+    except Exception as e:
+        print("Status: 500 Internal Server Error")
+        print("Cache-Control: no-store")
+        print("Content-Type: text/plain")
+        print("")
+        print("pubkey.chat is having a hard time right now.")
+        raise e
+
+
+@dataclass
+class Application:
+    """
+    This represents a single instance of our CGI application. Populate it with
+    values from the environment and then call `run` to see it spring into
+    action.
+    """
+    method: str
+    path: str
+    stdin: typing.BinaryIO
+    facades: typing.List[str]
+
+    def is_correct_shard_for(self, hash_digest: str) -> bool:
+        """
+        The sharding algorithm is simple: there are 16 shards, labeled 0x0
+        through 0xf. The first letter of the hash of some object determines
+        which shard it should be stored in.
+
+        The facades allow a single shard to pose as multiple shards, as long as
+        each DNS record is correctly configured. 
+        """
+        return hash_digest[0] in self.facades
+
+    def run(self) -> 'Response':
+        """
+        Figure out what real work needs to be done, based on the route (method
+        and uri pattern). 
+        """
+        if self.method == 'POST' and self.path.startswith('/objects/'):
+            return self.write_object()
+        elif self.method == 'GET' and self.path.startswith('/objects/'):
+            return self.read_object()
+        elif self.method == 'POST' and self.path == '/notices/new':
+            return self.send_notice()
+        else:
+            return Response.not_found()
+
+    def write_object(self) -> 'Response':
+        """
+        Attempt to write the POSTed object to the current shard if it passes
+        all the necessary conditions.
+        """
+        # Make sure that a hash was provided in the uri
+        expected_hash = extract_hash_from_object_uri(self.path)
+        if not expected_hash:
+            return Response.bad_request("Missing hash for this object")
+
+        # Make sure that we are the correct shard for this request
+        if not self.is_correct_shard_for(expected_hash):
+            return Response.redirect_to_correct_shard(expected_hash, self.path)
+
+        # Make sure that an object with this hash doesn't already exist.
+        dest = f"htdocs/objects/{expected_hash}.wmap"
+        if os.path.isfile(dest):
+            return Response.object_already_exists(expected_hash)
+
+        # Read the entire request body into memory. This is okay as long as the
+        # webserver defends us from large uploads. If we lose that protection,
+        # someone could leverage this to exhaust all available memory on this
+        # system.
+        body = self.stdin.read().encode()
+
+        # Make sure that the hash of this request is what the user claimed.  If
+        # this check passes, the `dest` string can be trusted.
+        actual_hash = hash_bytes(body)
+        if expected_hash != actual_hash:
+            return Response.bad_request("Incorrect hash for this object")
+
+        with tempfile.NamedTemporaryFile(delete=True) as f:
+            # Make sure that the request is *really* written to disk before we
+            # attempt to authenticate it.
+            write_to_disk(f, body)
+
+            # Make sure this request can be authenticated by the alleged
+            # author's GitHub pubkeys.
+            if not verify(f.name):
+                return Response.unverified_upload()
+
+            # Now that all preconditions are met, install the file and tell the
+            # user that their message was posted succesfully.
+            shutil.copy(f.name, dest)
+            return Response.message_posted(actual_hash)
+
+    def read_object(self) -> 'Response':
+        """
+        Attempt to read an object from the filesystem. Ideally, we do this only
+        rarely, since the caching should help us out.
+        """
+        # Make sure that a hash was provided in the uri
+        hd = extract_hash_from_object_uri(self.path)
+        if not hd:
+            return Response.bad_request("Missing hash for this object")
+
+        # Make sure that an object with this hash already exists.
+        file_path = f"htdocs/objects/{hd}.wmap"
+        if not os.path.isfile(file_path):
+            return Response.not_found()
+
+        # Reaad the file back to the user and mark it eligible for caching
+        with open(file_path) as f:
+            return Response.okay_cache(f.read())
+
+    def send_notice(self) -> 'Response':
+        """
+        Attempt to tell a topic about an object.
+        """
+        # Read the entire request body into memory. This is okay as long as the
+        # webserver defends us from large uploads. If we lose that protection,
+        # someone could leverage this to exhaust all available memory on this
+        # system.
+        body = self.stdin.read().encode()
+        wmap_envelope = json.loads(body)
+        notice = json.loads(base64.b64decode(wmap_envelope['body']))
+        topic = notice['topic']
+        expected_parent = notice['parent'] # Must match topic's HEAD
+        content = notice['content'] # hash of an extant object
+
+        topic_hash = hash_bytes(topic.encode())
+        if not self.is_correct_shard_for(topic_hash):
+            return Response.redirect_to_correct_shard(topic_hash, self.path)
+
+        with tempfile.NamedTemporaryFile() as g:
+            write_to_disk(g, body)
+            if not verify(g.name):
+                return Response.unverified_upload()
+
+            head = f"htdocs/notices/{topic_hash}"
+            Path(head).touch(exist_ok=True)
+            with open(head, "r+") as f:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    actual_parent = f.read()
+                    if actual_parent == expected_parent:
+                        # User is up to date, so we can write
+                        new_parent = hash_bytes(body)
+                        f.seek(0)
+                        f.write(new_parent)
+                        f.truncate()
+                        shutil.copy(g.name, f"htdocs/objects/{new_parent}.wmap")
+                        return Response.notice_posted(topic)
+                except IOError:
+                    return Response.try_again_later()
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+
+
+
+def write_to_disk(f: typing.BinaryIO, body: bytes):
+    f.write(body)
+    f.flush()
+    os.fsync(f.fileno())
+
+
+def hash_bytes(data: bytes) -> str:
+    state = hashlib.sha256()
+    state.update(data)
+    return state.hexdigest()
+
+
+def extract_hash_from_object_uri(uri: str) -> str | None:
+    pattern = r'/objects/([a-fA-F0-9]{64})\.wmap'
+    match = re.search(pattern, uri)
+    if match:
+        return match.group(1)
+
+
+@dataclass
+class Response:
+    status: str
+    body: str
+    headers: typing.Dict[str, str]
+
+    @classmethod
+    def okay_cache(cls, body):
+        return cls("200 OK",
+                   body,
+                   {"Cache-Control": "public, max-age=31536000"})
+
+    @classmethod
+    def not_found(cls):
+        return cls("404 Not Found",
+                   "No object exists at this path.",
+                   {"Cache-Control: no-store"})
+
+    @classmethod
+    def object_already_exists(cls, hd):
+        return cls("409 Conflict",
+                   "An object with this hash already exists.",
+                   {"Location": f"/objects/{hd}.wmap"})
+
+    @classmethod
+    def redirect_to_correct_shard(cls, hd, uri):
+        shard = hd[0]
+        return cls("308 Permanent Redirect",
+                   "Point your client to the correct shard for this request.",
+                   {"Location": f"https://{shard}.pubkey.chat{uri}"})
+
+    @classmethod
+    def message_posted(cls, hd):
+        return cls("201 Created",
+                   "Your message has been posted.",
+                   {"Location": f"/objects/{hd}.wmap"})
+
+    @classmethod
+    def notice_posted(cls, topic):
+        return cls("200 OK",
+                   "Your notice was posted.",
+                   {"Location": f"/notices/{topic}"})
+        
+    @classmethod
+    def unverified_upload(cls):
+        return cls("401 Unauthorized",
+                   "Your post could not be verified against your pubkeys.")
+
+    @classmethod
+    def bad_request(cls, message):
+        return cls("404 Bad Request", body)
+
+    def __str__(self):
+        r = list()
+        r.append(f"Status: {self.status}")
+        r.append("Content-Type: text/plain")
+        if self.headers:
+            for key, value in self.headers.items():
+                r.append(f"{key}: {value}")
+        r.append("")
+        r.append(self.body)
+        return "\n".join(r)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    if 'REQUEST_METHOD' in os.environ:
+        cgi_main()
+    else:
+        main()
