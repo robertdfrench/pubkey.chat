@@ -442,6 +442,11 @@ class Application:
     This represents a single instance of our CGI application. Populate it with
     values from the environment and then call `run` to see it spring into
     action.
+
+    The client is reponsible for posting the correct message to the correct
+    shard. For objects, the correct shard is the first letter of the hash of
+    the wmap object being posted. For notices, the correct shard is the first
+    letter of the hash of the topic name.
     """
     method: str
     path: str
@@ -562,7 +567,7 @@ class Application:
             if not verify(g.name):
                 return Response.unverified_upload()
 
-            head = f"htdocs/notices/{topic_hash}"
+            head = f"htdocs/notices/{topic_hash}.head"
             Path(head).touch(exist_ok=True)
             with open(head, "r+") as f:
                 try:
@@ -580,6 +585,22 @@ class Application:
                     return Response.try_again_later()
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
+
+    def read_notice(self) -> 'Response':
+        """
+        Read a notice from the filesystem.
+        """
+        hd = extract_hash_from_notices_uri(self.path)
+        if not hd:
+            return Response.bad_request("Missing hash for this object")
+
+        file_path = f"htdocs/notices/{hd}.head"
+        if not os.path.isfile(file_path):
+            return Response.not_found()
+
+        with open(file_path) as f:
+            return Response.okay_cache(f.read())
+
 
 
 
@@ -602,6 +623,13 @@ def extract_hash_from_object_uri(uri: str) -> str | None:
         return match.group(1)
 
 
+def extract_hash_from_notices_uri(uri: str) -> str | None:
+    pattern = r'/notices/([a-fA-F0-9]{64})\.head'
+    match = re.search(pattern, uri)
+    if match:
+        return match.group(1)
+
+
 @dataclass
 class Response:
     status: str
@@ -618,7 +646,7 @@ class Response:
     def not_found(cls):
         return cls("404 Not Found",
                    "No object exists at this path.",
-                   {"Cache-Control: no-store"})
+                   {"Cache-Control": "no-store"})
 
     @classmethod
     def object_already_exists(cls, hd):
