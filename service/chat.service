@@ -1,0 +1,11 @@
+[Unit]
+Description=Chat Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/service.py
+Restart=always
+User=nobody
+
+[Install]
+WantedBy=multi-user.target

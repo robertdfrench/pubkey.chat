@@ -24,7 +24,7 @@ freeze: .venv/ready #: Freeze the current requirements
 	touch $@
 
 clean_build:
-	rm -rf build
+	rm -rf build .venv
 
 %/.dir:
 	mkdir -p $*
