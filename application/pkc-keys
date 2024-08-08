@@ -1,4 +1,0 @@
-#!/bin/ksh
-username=$1
-logger "akc ${username}"
-/usr/bin/ftp -MV -o - "https://github.com/${username}.keys"

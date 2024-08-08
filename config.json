@@ -1,7 +1,0 @@
-{
-	"vultr": {
-		"plan": "vhp-1c-1gb-intel",
-		"principal_region": "atl",
-		"os": "OpenBSD 7.2 x64"
-	}
-}

@@ -1,6 +1,0 @@
-{
-  "label" : "GitHub Actions Runner",
-  "hostname": "runner.pubkey.sbs",
-  "os_id": 1743,
-  "tags": ["out-of-band"]
-}
