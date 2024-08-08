@@ -3,15 +3,19 @@ import os
 import boto3
 import time
 import subprocess
+import configparser
 from botocore.exceptions import ClientError
 
+config = configparser.ConfigParser()
+config.read("/etc/chat.ini")
+
 # AWS Clients
-s3_client = boto3.client('s3')
-sqs_client = boto3.client('sqs')
+s3_client = boto3.client('s3', region_name=config['DEFAULT']['region'])
+sqs_client = boto3.client('sqs', region_name=config['DEFAULT']['region'])
 
 # Environment Variables
-QUEUE_URL = os.getenv('QUEUE_URL')
-BUCKET_NAME = os.getenv('BUCKET_NAME')
+QUEUE_URL = config['DEFAULT']['queue_url']
+BUCKET_NAME = config['DEFAULT']['bucket_name']
 
 def process_messages():
     while True:

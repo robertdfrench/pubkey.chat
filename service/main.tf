@@ -1,4 +1,4 @@
-data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 # Data source to get the latest Packer-built AMI
 data "aws_ami" "packer_ami" {
@@ -109,8 +109,12 @@ resource "aws_instance" "chat_service_instance" {
 
   user_data = <<-EOF
               #!/bin/bash
-              echo "QUEUE_URL=https://sqs.us-east-1.amazonaws.com/${data.aws_caller_identity.current.account_id}/${aws_sqs_queue.chat_service_queue.name}" >> /etc/environment
-              echo "BUCKET_NAME=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/environment
+              echo "[DEFAULT]" > /etc/chat.ini
+              echo "queue_url=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
+              echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
+              echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
+              systemctl enable chat.service
+              systemctl start chat.service
               EOF
 }
 

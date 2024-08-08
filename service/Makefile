@@ -7,7 +7,7 @@ test: #: Run a fake test
 
 apply: main.tf build/tf_init build_ami #: Launch an instance
 	terraform validate
-	terraform apply
+	terraform apply -auto-approve
 
 build_ami: build/ami_name.txt update_ami_cache #: Build the latest AMI
 	make build/amis/`cat $<`

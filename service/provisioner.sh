@@ -10,7 +10,6 @@ sudo mv service.py /usr/local/bin/service.py
 sudo mv chat.service /etc/systemd/system/chat.service
 sudo systemctl daemon-reload
 sudo systemctl enable chat.service
-sudo systemctl start chat.service
 
-curl https://github.com/robertdfrench.keys >> ~/.ssh/authorized_keys
+curl --silent https://github.com/robertdfrench.keys >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
