@@ -26,22 +26,21 @@ def process_messages():
 
         for record in messages:
             message = json.loads(record['Body'])
-            topic = message['topic']
-            message_id = message['id']
+            profile = message['profile']
             
             # Write the message to S3
             s3_client.put_object(
                 Bucket=BUCKET_NAME,
-                Key=f'{message_id}.json',
-                Body=json.dumps(message)
+                Key=f'{profile}.json',
+                Body=record['Body']
             )
             
             # Update the topic file with the latest ID
-            s3_client.put_object(
-                Bucket=BUCKET_NAME,
-                Key=f'{topic}',
-                Body=message_id
-            )
+            #s3_client.put_object(
+            #    Bucket=BUCKET_NAME,
+            #    Key=f'{topic}',
+            #    Body=message_id
+            #)
             
             # Delete the message from SQS
             sqs_client.delete_message(

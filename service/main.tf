@@ -21,6 +21,62 @@ resource "aws_sqs_queue" "chat_service_queue" {
   name = "chat-service-queue"
 }
 
+# Create IAM role
+resource "aws_iam_role" "chat_service_role" {
+  name = "chat_service_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        },
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Attach policy to IAM role
+resource "aws_iam_role_policy" "chat_service_policy" {
+  name   = "chat_service_policy"
+  role   = aws_iam_role.chat_service_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:GetObject"
+        ],
+        Resource = [
+          "${aws_s3_bucket.chat_service_bucket.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ],
+        Resource = "${aws_sqs_queue.chat_service_queue.arn}"
+      }
+    ]
+  })
+}
+
+# Create instance profile
+resource "aws_iam_instance_profile" "chat_service_instance_profile" {
+  name = "chat_service_instance_profile"
+  role = aws_iam_role.chat_service_role.name
+}
+
 # Create a security group for the EC2 instance
 resource "aws_security_group" "chat_service_sg" {
   name_prefix = "chat-service-sg"
@@ -45,6 +101,7 @@ resource "aws_instance" "chat_service_instance" {
   ami           = data.aws_ami.packer_ami.id
   instance_type = "t2.micro"
   security_groups = [aws_security_group.chat_service_sg.name]
+  iam_instance_profile = aws_iam_instance_profile.chat_service_instance_profile.name
 
   tags = {
     Name = "Chat Service Instance"
