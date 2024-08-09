@@ -8,10 +8,21 @@ resource "aws_api_gateway_resource" "messages" {
   parent_id   = aws_api_gateway_rest_api.chat.root_resource_id
   path_part   = "messages"
 }
+resource "aws_api_gateway_resource" "topics" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  parent_id   = aws_api_gateway_rest_api.chat.root_resource_id
+  path_part   = "topics"
+}
 
 resource "aws_api_gateway_resource" "messages_name" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   parent_id   = aws_api_gateway_resource.messages.id
+  path_part   = "{name}"
+}
+
+resource "aws_api_gateway_resource" "topics_name" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  parent_id   = aws_api_gateway_resource.topics.id
   path_part   = "{name}"
 }
 
@@ -25,6 +36,17 @@ resource "aws_api_gateway_method" "create_message" {
 resource "aws_api_gateway_method" "get_message" {
   rest_api_id   = aws_api_gateway_rest_api.chat.id
   resource_id   = aws_api_gateway_resource.messages_name.id
+  http_method   = "GET"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.name" = true
+  }
+}
+
+resource "aws_api_gateway_method" "get_topic" {
+  rest_api_id   = aws_api_gateway_rest_api.chat.id
+  resource_id   = aws_api_gateway_resource.topics_name.id
   http_method   = "GET"
   authorization = "NONE"
 
@@ -63,7 +85,21 @@ resource "aws_api_gateway_integration" "get_message" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/{name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/messages/{name}"
+  request_parameters = {
+    "integration.request.path.name" = "method.request.path.name"
+  }
+}
+
+resource "aws_api_gateway_integration" "get_topic" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.topics_name.id
+  http_method = aws_api_gateway_method.get_message.http_method
+  credentials = aws_iam_role.api_gateway_sqs_role.arn
+
+  integration_http_method = "GET"
+  type                    = "AWS"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/topics/{name}"
   request_parameters = {
     "integration.request.path.name" = "method.request.path.name"
   }
@@ -73,6 +109,17 @@ resource "aws_api_gateway_method_response" "get_message_200" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   resource_id = aws_api_gateway_resource.messages_name.id
   http_method = aws_api_gateway_method.get_message.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Content-Type" = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "get_topic_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.topics_name.id
+  http_method = aws_api_gateway_method.get_topic.http_method
   status_code = "200"
 
   response_parameters = {
@@ -92,6 +139,21 @@ resource "aws_api_gateway_integration_response" "get_message_200" {
 
   depends_on = [
     aws_api_gateway_integration.get_message
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "get_topic_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.topics_name.id
+  http_method = aws_api_gateway_method.get_topic.http_method
+  status_code = aws_api_gateway_method_response.get_topic_200.status_code
+
+  response_parameters = {
+    "method.response.header.Content-Type" = "integration.response.header.Content-Type"
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.get_topic
   ]
 }
 
@@ -140,6 +202,10 @@ resource "aws_api_gateway_deployment" "chat" {
       aws_api_gateway_integration.get_message.id,
       aws_api_gateway_method_response.get_message_200.id,
       aws_api_gateway_integration_response.get_message_200.id,
+      aws_api_gateway_method.get_topic.id,
+      aws_api_gateway_integration.get_topic.id,
+      aws_api_gateway_method_response.get_topic_200.id,
+      aws_api_gateway_integration_response.get_topic_200.id,
     ]))
   }
 
@@ -266,4 +332,8 @@ output "write_url" {
 
 output "read_url" {
   value = "${aws_api_gateway_stage.prod.invoke_url}/messages/{name}"
+}
+
+output "read_topic_url" {
+  value = "${aws_api_gateway_stage.prod.invoke_url}/topics/{name}"
 }

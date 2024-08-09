@@ -38,7 +38,7 @@ def process_messages():
             continue
 
         for record in messages:
-            message_name = compute_message_name(record['body'])
+            message_name = compute_message_name(record['Body'])
             message = json.loads(record['Body'])
             profile = message['profile']
 
