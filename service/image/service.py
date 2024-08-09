@@ -1,5 +1,7 @@
+#!/usr/bin/python3
 import base64
 import boto3
+from botocore.exceptions import ClientError
 import configparser
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -52,28 +54,40 @@ def main():
 
             if valid:
                 message_name = compute_message_name(record['Body'])
-                message = json.loads(record['Body'])
-                profile = message['profile']
+                interior_message = json.loads(message.body)
+                expected_parent = interior_message['parent']
+                topic = interior_message['topic']
 
-                # Write the message to S3
-                s3_client.put_object(
-                    Bucket=BUCKET_NAME,
-                    Key=f'messages/{message_name}',
-                    Body=record['Body']
-                )
+                actual_parent = topic_parent(s3_client, topic) 
+                if ((not actual_parent) or (actual_parent == expected_parent)):
+                    # Write the message to S3
+                    s3_client.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=f'messages/{message_name}',
+                        Body=record['Body']
+                    )
 
-                # Update the TOPIC for profile
-                s3_client.put_object(
-                    Bucket=BUCKET_NAME,
-                    Key=f'topics/{profile}',
-                    Body=message_name
-                )
-            
+                    # Update the TOPIC for profile
+                    s3_client.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=f'topics/{topic}',
+                        Body=message_name
+                    )
+
             # Delete the message from SQS
             sqs_client.delete_message(
                 QueueUrl=QUEUE_URL,
                 ReceiptHandle=record['ReceiptHandle']
             )
+
+
+def topic_parent(s3_client, topic):
+    try:
+        o = s3_client.get_object(Bucket=BUCKET_NAME, Key=f'topics/{topic}')
+        actual_parent = o['Body'].read().decode('utf-8')
+        return actual_parent
+    except:
+        return None
 
 
 def compute_message_name(body: str) -> str:
