@@ -9,10 +9,10 @@ help: #: Print this help message
 		| sort
 
 freeze: .venv/ready #: Freeze the current requirements
-	$(venv) pip freeze > requirements.txt
+	$(venv) pip freeze > dev-requirements.txt
 
-.venv/ready: requirements.txt .venv/upgrade
-	$(venv) pip install -r requirements.txt
+.venv/ready: dev-requirements.txt .venv/upgrade
+	$(venv) pip install -r dev-requirements.txt
 	touch $@
 
 .venv/upgrade: .venv/init

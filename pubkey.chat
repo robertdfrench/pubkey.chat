@@ -1,72 +1,108 @@
 #!/usr/bin/env python3
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Copyright 2024 Robert D. French
+"""
+The Web-based Message Authentication Protocol
+
+WMAP allows secure exchange of signed messages between users using their GitHub
+SSH keys. This tool allows you to sign, verify, and extract messages.
+
+Key features:
+- Sign messages using SSH keys linked to GitHub accounts
+- Verify the authenticity and integrity of signed messages
+- Extract the content of signed messages
+
+This module implements the core functionality of WMAP, including command-line
+interface, cryptographic operations, and file handling.
+"""
 import argparse
 import base64
-import curses
 from dataclasses import dataclass
 from enum import Enum, auto
 import json
-import subprocess
-import sys
-import tempfile
-import threading
-import time
 from typing import List
 import os
 from urllib import request
-import uuid
+import subprocess
+import sys
+import tempfile
 
-API_BASE_URL = "https://oe9xunloch.execute-api.us-east-1.amazonaws.com/prod"  # Replace with the actual base URL of the web service
-MESSAGE_LIST = []
-LATEST_PARENT = ""
+
+# This is the SSH signing namespace that we use for wmap messages. This is to
+# distinguish WMAP signatures from other SSH signin functions, as encouraged by
+# the ssh-keygen(1) man page.
 NAMESPACE = "wmap@wmap.dev"
 
 
-def fetch_messages():  # pragma: no cover
-    global LATEST_PARENT
-    with request.urlopen(f"{API_BASE_URL}/topics/default") as response:
-        parent = response.read().decode().rstrip()
-    if parent != LATEST_PARENT:
-        LATEST_PARENT = parent
-        with request.urlopen(f"{API_BASE_URL}/messages/{parent}") as response:
-            message = json.loads(response.read().decode())
-            interior = json.loads(str(base64.b64decode(message['body']), 'utf-8'))
-            MESSAGE_LIST.append(interior['data'])
-    return MESSAGE_LIST
+def main():  # pragma: no cover
+    """
+    Application entrypoint.
 
+    This is the application entrypoint (called at the end of this file in
+    the traditional python fashion). It assembles the command line interface
+    via argparse, and then passes control to one of the subcommand functions.
 
-def post_message(message):  # pragma: no cover
-    profile = "robertdfrench"
-    keypath = "/Users/robert/.ssh/id_rsa"
-    interior = {}
-    interior['topic'] = "default"
-    interior['parent'] = LATEST_PARENT
-    interior['data'] = message
-    with tempfile.NamedTemporaryFile() as f:
-        f.write(bytes(json.dumps(interior), 'utf-8'))
-        f.flush()
-        sign(profile, keypath, f.name)
-        post_json_file(f"{API_BASE_URL}/messages", f.name + ".wmap")
+    Subcommands:
+    - sign: Sign a file using your GitHub username and SSH key
+    - verify: Verify the authenticity of a signed file
+    - extract: Extract the content of a signed file, with an option to skip
+      validation
 
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    # Setup the command line argument parser.
+    #
+    # This parser will read the comand line arguments provided by the user and
+    # turn them into a structure that we can query. This will allow us to
+    # determine what actions to perform later on.
+    #
+    # If you have not worked with argparse before, check out the tutorial:
+    # https://docs.python.org/3/howto/argparse.html#argparse-tutorial
+    parser = argparse.ArgumentParser(
+            description='wmap.py: A tool to sign or verify files.')
+    subparsers = parser.add_subparsers(dest='command', help='sub-command help')
 
-def post_json_file(url, file_path):
-    # Read the JSON file
-    with open(file_path, 'r') as json_file:
-        data = json.load(json_file)
-    
-    # Convert the JSON data to a byte stream
-    data_bytes = json.dumps(data).encode('utf-8')
+    # Setup subparser for the 'sign' command
+    parser_sign = subparsers.add_parser(
+            'sign', help='Sign a file')
+    parser_sign.add_argument(
+            'username', type=str, help='GitHub username')
+    parser_sign.add_argument(
+            'key', type=str, help='SSH private key to use for signing')
+    parser_sign.add_argument(
+            'file', type=str, help='File to be signed')
 
-    # Set the request headers
-    headers = {
-        'Content-Type': 'application/json'
-    }
+    # Setup subparser for the 'verify' command
+    parser_verify = subparsers.add_parser(
+            'verify', help='Verify a signed file')
+    parser_verify.add_argument(
+            'file', type=str, help='Signed file to be verified')
 
-    # Create the request object
-    r = request.Request(url, data=data_bytes, headers=headers, method='POST')
+    # Setup subparser for the 'extract' command
+    parser_extract = subparsers.add_parser(
+            'extract', help='Extract a signed file')
+    parser_extract.add_argument(
+            '--skip-validation', action='store_true',
+            help='Something is very wrong if you need to use this flag')
+    parser_extract.add_argument(
+            'file', type=str, help='Signed file to be extracted')
 
-    # Send the request and get the response
-    with request.urlopen(r) as response:
-        return response.read().decode('utf-8')
+    args = parser.parse_args()
+
+    # Call the appropriate function based on the subcommand. Each subcommand is
+    # handled by its own function, and each expects different arguments.
+    if args.command == 'sign':
+        sign(args.username, args.key, args.file)
+    elif args.command == 'verify':
+        verify(args.file)
+    elif args.command == 'extract':
+        extract(args.file, args.skip_validation)
+    else:
+        parser.print_help()
 
 
 def sign(username: str, key: str, file: str):  # pragma: no cover
@@ -94,60 +130,48 @@ def sign(username: str, key: str, file: str):  # pragma: no cover
     message.dump(file + ".wmap")            # Write WMAP-formatted msg to disk
     os.remove(file + ".sig")                # Remove temporary sig file
 
-def chat_window(stdscr):  # pragma: no cover
-    curses.curs_set(0)  # Hide cursor
-    stdscr.nodelay(1)  # Don't block when waiting for input
-    stdscr.timeout(1000)  # Refresh every second
 
-    messages_win = curses.newwin(curses.LINES - 3, curses.COLS, 0, 0)
-    input_win = curses.newwin(3, curses.COLS, curses.LINES - 3, 0)
-    
-    input_win.addstr(1, 1, "> ")
-    input_win.refresh()
-    
-    current_input = ""
-    messages = []
+def verify(file: str):  # pragma: no cover
+    """
+    Verify the signature of a WMAP-formatted file.
 
-    def update_messages():
-        nonlocal messages
-        while True:
-            new_messages = fetch_messages()
-            if new_messages:
-                messages = new_messages
-            time.sleep(2)
+    Parameters:
+    - file: the path to a WMAP-formatted file
 
-    # Start a background thread to update messages
-    thread = threading.Thread(target=update_messages)
-    thread.daemon = True
-    thread.start()
+    If the file cannot be verified, this function will cause wmap to exit
+    nonzero.
 
-    while True:
-        messages_win.clear()
-        input_win.clear()
-        input_win.addstr(1, 1, f"> {current_input}")
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    sigfile = file + ".sig"
+    message = Message.load(file)     # Load message from disk
+    message.signature.dump(sigfile)  # Extract signature temporarily
+    valid = message.profile.verify_signed_data(
+            message.body, sigfile)   # Check signature against profile & body
+    os.remove(sigfile)               # Remove temporary signature
+    if not valid:
+        print("This document is not valid", file=sys.stderr)
+        sys.exit(1)
 
-        for i, msg in enumerate(messages[-(curses.LINES - 3):]):
-            messages_win.addstr(i, 0, msg)
 
-        messages_win.refresh()
-        input_win.refresh()
+def extract(file: str, skip_validation: bool = False):  # pragma: no cover
+    """
+    Verify, decode, and print the body of a WMAP-formatted file.
 
-        key = stdscr.getch()
-        if key == curses.KEY_RESIZE:
-            # Resize windows if terminal size changes
-            messages_win.resize(curses.LINES - 3, curses.COLS)
-            input_win.resize(3, curses.COLS)
-            input_win.mvwin(curses.LINES - 3, 0)
-        elif key == ord('\n'):
-            if current_input.strip():
-                post_message(current_input.strip())
-                current_input = ""
-        elif key == 27:  # Escape key
-            break
-        elif key == curses.KEY_BACKSPACE or key == 127:
-            current_input = current_input[:-1]
-        elif key != -1:
-            current_input += chr(key)
+    Parameters:
+    - file: the path to a WMAP-formatted file
+    - skip_validation: allow wmap to extract the body from an invalid file.
+
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    if not skip_validation:  # Read this as 'if validate == True'
+        verify(file)
+    # If the message has a good signature, extract and print the body
+    message = Message.load(file)
+    print(str(message.body, 'utf-8'))
+
 
 class Algorithm(Enum):
     """
@@ -435,5 +459,12 @@ class Message:
         with open(path, 'w') as f:
             json.dump(self.into_dict(), f)
 
+
 if __name__ == "__main__":  # pragma: no cover
-    curses.wrapper(chat_window)
+    # This is a common Python trick.
+    #
+    # The `main` function is only called if this file is being run as a
+    # *program* (in which case the global __name__ variable will be set to
+    # "__main__"). If this file is being used as a library (which is the case
+    # when we run the unit tests), `main` will not be called.
+    main()
