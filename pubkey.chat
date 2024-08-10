@@ -20,6 +20,7 @@ interface, cryptographic operations, and file handling.
 """
 import argparse
 import base64
+import curses
 from dataclasses import dataclass
 from enum import Enum, auto
 import json
@@ -29,6 +30,8 @@ from urllib import request
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 
 # This is the SSH signing namespace that we use for wmap messages. This is to
@@ -132,7 +135,25 @@ def chat(username: str, key: str, topic: str):  # pragma: no cover
     - key: Path to your SSH private key
     - topic: The room you'd like to join
     """
-    print(f"{username} [{key}] connecting to #{topic}")
+    def chat_main(stdscr):
+        user = SessionUser(username, key, topic)
+        session = ChatSession(stdscr, user)
+
+        def update_messages():
+            while True:
+                session.update_messages()
+                time.sleep(2)
+
+        comms_thread = threading.Thread(target=update_messages)
+        comms_thread.daemon = True
+        comms_thread.start()
+
+        while True:
+            session.redraw()
+            session.check_input()
+            time.sleep(0.016)
+
+    curses.wrapper(chat_main)
 
 
 def extract(file: str, skip_validation: bool = False):  # pragma: no cover
@@ -310,6 +331,83 @@ class ChatAPIClient:
         url = f"{self.api_base_url}/messages"
         payload = message.into_dict()
         return self.rest_client.post_json(url, payload)
+
+
+@dataclass
+class SessionUser:
+    username: str
+    key: str
+    topic: str
+
+
+class ChatSession:  # pragma: no cover
+    def __init__(self, stdscr, user: SessionUser):
+        self.stdscr = stdscr
+        self.user = user
+        self.current_input = ""
+        self.messages: list[str] = []
+        self.parent = ""
+        self.client = ChatAPIClient(API_BASE_URL, RestClient())
+
+        curses.curs_set(0)  # Hide cursor
+        stdscr.nodelay(1)  # Don't block when waiting for input
+        stdscr.timeout(1000)  # Refresh every second
+
+        self.messages_win = curses.newwin(curses.LINES - 3, curses.COLS, 0, 0)
+        self.input_win = curses.newwin(3, curses.COLS, curses.LINES - 3, 0)
+
+        self.input_win.addstr(1, 1, "> ")
+        self.input_win.refresh()
+
+    def post_message(self, text):
+        interior = dict()
+        interior['topic'] = self.user.topic
+        interior['parent'] = self.parent
+        interior['data'] = text
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(bytes(json.dumps(interior), 'utf-8'))
+            f.flush()
+            sign(self.user.username, self.user.key, f.name)
+            msg = Message.load(f.name + ".wmap")
+            self.client.post_message(msg)
+
+
+    def update_messages(self):
+        parent = self.client.get_head(self.user.topic)
+        if parent != self.parent:
+            self.parent = parent
+            msg = self.client.get_message(parent)
+            interior = json.loads(msg.body.decode())
+            self.messages.append(
+                msg.profile.username + ": " + interior['data']
+            )
+
+    def redraw(self):
+        self.messages_win.clear()
+        self.input_win.clear()
+        self.input_win.addstr(1, 1, f"> {self.current_input}")
+        for i, msg in enumerate(self.messages[-(curses.LINES - 3):]):
+            self.messages_win.addstr(i, 0, msg)
+        self.messages_win.refresh()
+        self.input_win.refresh()
+
+    def check_input(self):
+        key = self.stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            # Resize windows if terminal size changes
+            self.messages_win.resize(curses.LINES - 3, curses.COLS)
+            self.input_win.resize(3, curses.COLS)
+            self.input_win.mvwin(curses.LINES - 3, 0)
+        elif key == ord('\n'):
+            if self.current_input.strip():
+                self.post_message(self.current_input.strip())
+                self.current_input = ""
+        elif key == 27:  # Escape key
+            raise "escape"
+        elif key == curses.KEY_BACKSPACE or key == 127:
+            self.current_input = self.current_input[:-1]
+        elif key != -1:
+            self.current_input += chr(key)
 
 
 @dataclass
