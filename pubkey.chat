@@ -37,6 +37,12 @@ import tempfile
 NAMESPACE = "wmap@wmap.dev"
 
 
+# This is the hardcoded base URL for the pubkey.chat service. This will need to
+# be configured, in the future, to default to `pubkey.chat` but also be
+# overridable for the sake of testing.
+API_BASE_URL = "https://oe9xunloch.execute-api.us-east-1.amazonaws.com/prod"
+
+
 def main():  # pragma: no cover
     """
     Application entrypoint.
@@ -63,8 +69,27 @@ def main():  # pragma: no cover
     # If you have not worked with argparse before, check out the tutorial:
     # https://docs.python.org/3/howto/argparse.html#argparse-tutorial
     parser = argparse.ArgumentParser(
-            description='wmap.py: A tool to sign or verify files.')
+            description='pubkey.chat: Signed communication via GitHub keys')
     subparsers = parser.add_subparsers(dest='command', help='sub-command help')
+
+    # Setup subparser for the 'chat' command
+    parser_chat = subparsers.add_parser(
+            'chat', help='Chat with other GitHub users')
+    parser_chat.add_argument(
+            'username', type=str, help='GitHub username')
+    parser_chat.add_argument(
+            'key', type=str, help='SSH private key to use for chatting')
+    parser_chat.add_argument(
+            'topic', type=str, help='Chat Topic')
+
+    # Setup subparser for the 'extract' command
+    parser_extract = subparsers.add_parser(
+            'extract', help='Extract a signed file')
+    parser_extract.add_argument(
+            '--skip-validation', action='store_true',
+            help='Something is very wrong if you need to use this flag')
+    parser_extract.add_argument(
+            'file', type=str, help='Signed file to be extracted')
 
     # Setup subparser for the 'sign' command
     parser_sign = subparsers.add_parser(
@@ -82,27 +107,50 @@ def main():  # pragma: no cover
     parser_verify.add_argument(
             'file', type=str, help='Signed file to be verified')
 
-    # Setup subparser for the 'extract' command
-    parser_extract = subparsers.add_parser(
-            'extract', help='Extract a signed file')
-    parser_extract.add_argument(
-            '--skip-validation', action='store_true',
-            help='Something is very wrong if you need to use this flag')
-    parser_extract.add_argument(
-            'file', type=str, help='Signed file to be extracted')
-
     args = parser.parse_args()
 
     # Call the appropriate function based on the subcommand. Each subcommand is
     # handled by its own function, and each expects different arguments.
-    if args.command == 'sign':
+    if args.command == 'chat':
+        chat(args.username, args.key, args.topic)
+    elif args.command == 'extract':
+        extract(args.file, args.skip_validation)
+    elif args.command == 'sign':
         sign(args.username, args.key, args.file)
     elif args.command == 'verify':
         verify(args.file)
-    elif args.command == 'extract':
-        extract(args.file, args.skip_validation)
     else:
         parser.print_help()
+
+
+def chat(username: str, key: str, topic: str):  # pragma: no cover
+    """
+    Open a chat window for 'topic'
+
+    Parameters:
+    - username: Your GitHub username
+    - key: Path to your SSH private key
+    - topic: The room you'd like to join
+    """
+    print(f"{username} [{key}] connecting to #{topic}")
+
+
+def extract(file: str, skip_validation: bool = False):  # pragma: no cover
+    """
+    Verify, decode, and print the body of a WMAP-formatted file.
+
+    Parameters:
+    - file: the path to a WMAP-formatted file
+    - skip_validation: allow wmap to extract the body from an invalid file.
+
+    QA note: This function is not covered in unit testing as it is part of the
+    user interface.
+    """
+    if not skip_validation:  # Read this as 'if validate == True'
+        verify(file)
+    # If the message has a good signature, extract and print the body
+    message = Message.load(file)
+    print(str(message.body, 'utf-8'))
 
 
 def sign(username: str, key: str, file: str):  # pragma: no cover
@@ -153,24 +201,6 @@ def verify(file: str):  # pragma: no cover
     if not valid:
         print("This document is not valid", file=sys.stderr)
         sys.exit(1)
-
-
-def extract(file: str, skip_validation: bool = False):  # pragma: no cover
-    """
-    Verify, decode, and print the body of a WMAP-formatted file.
-
-    Parameters:
-    - file: the path to a WMAP-formatted file
-    - skip_validation: allow wmap to extract the body from an invalid file.
-
-    QA note: This function is not covered in unit testing as it is part of the
-    user interface.
-    """
-    if not skip_validation:  # Read this as 'if validate == True'
-        verify(file)
-    # If the message has a good signature, extract and print the body
-    message = Message.load(file)
-    print(str(message.body, 'utf-8'))
 
 
 class Algorithm(Enum):
@@ -257,6 +287,126 @@ class AuthorizedKey:
         algorithm = str(self.algorithm)
         material = self.material
         return f"{principal} namespaces=\"{NAMESPACE}\" {algorithm} {material}"
+
+
+@dataclass
+class ChatAPIClient:
+    """
+    Raw operations with the Chat Service backend
+    """
+    api_base_url: str
+    rest_client: 'RestClient'
+
+    def get_message(self, message_id: str) -> 'Message':
+        url = f"{self.api_base_url}/messages/{message_id}"
+        msg_text = self.rest_client.get(url)
+        return Message.loads(msg_text)
+
+    def get_head(self, topic: str) -> str:
+        url = f"{self.api_base_url}/topics/{topic}"
+        return self.rest_client.get(url).rstrip()
+
+    def post_message(self, message: 'Message') -> str:
+        url = f"{self.api_base_url}/messages"
+        payload = message.into_dict()
+        return self.rest_client.post_json(url, payload)
+
+
+@dataclass
+class RestClient:  # pragma: no cover
+    def get(self, url: str) -> str:
+        with request.urlopen(url) as response:
+            return response.read().decode()
+
+    def post_json(self, url: str, payload: dict) -> str:
+        data = json.dumps(payload).encode()
+        headers = {'Content-Type': 'application/json'}
+        r = request.Request(url, data=data, headers=headers, method='POST')
+        with request.urlopen(r) as response:
+            return response.read().decode()
+
+
+@dataclass
+class Message:
+    """
+    A signed copy of the original content, which can be shared with and
+    validated by anyone.
+    """
+    profile: 'Profile'
+    body: bytes
+    signature: 'Signature'
+
+    @classmethod
+    def from_signed_file(cls, profile: 'Profile', path: str) -> 'Message':
+        """
+        Create a Message object from a file and its signature.
+
+        Parameters:
+        - profile: the GitHub profile of the user who signed this document
+        - path: path to the document which was signed
+
+        Assumptions:
+        The document referenced by `path` should have been signed (using wmap)
+        prior to calling this method. In particular, an OpenSSH-formatted
+        signature file should exist on disk at `path`.sig.
+        """
+        with open(path, 'rb') as f:
+            body = f.read()
+        signature = Signature.load(path + ".sig")
+        return cls(profile, body, signature)
+
+    @classmethod
+    def load(cls, path: str) -> 'Message':
+        """
+        Load an existing JSON-formatted WMAP message from disk.
+
+        Parameters:
+        - path: path to the JSON-formatted WMAP message
+        """
+        with open(path) as f:
+            return cls.loads(f.read())
+
+    @classmethod
+    def loads(cls, data: str) -> 'Message':
+        """
+        Load an existing JSON-formatted WMAP message from disk.
+
+        Parameters:
+        - path: path to the JSON-formatted WMAP message
+        """
+        d = json.loads(data)
+        profile = Profile(d['profile'])
+        signature = Signature(d['signature'])
+        body = base64.b64decode(d['body'])
+        return cls(profile, body, signature)
+
+    def into_dict(self) -> dict[str, str]:
+        """
+        Convert this object into a python dictionary, and convert each of its
+        fields into their string representation.
+        """
+        return {
+            'profile': str(self.profile),
+            'body': str(base64.b64encode(self.body), 'utf-8'),
+            'signature': str(self.signature)
+        }
+
+    def dump(self, path: str):
+        """
+        Store this message on disk.
+
+        Parameters:
+        - path: path on disk where this JSON-formatted WMAP message should be
+          written.
+        """
+        with open(path, 'w') as f:
+            json.dump(self.into_dict(), f)
+
+    def dumps(self) -> str:
+        """
+        Convert this message to a json string
+        """
+        return json.dumps(self.into_dict())
 
 
 @dataclass
@@ -391,73 +541,6 @@ class Signature:
 
     def __str__(self) -> str:
         return self.content
-
-
-@dataclass
-class Message:
-    """
-    A signed copy of the original content, which can be shared with and
-    validated by anyone.
-    """
-    profile: Profile
-    body: bytes
-    signature: Signature
-
-    @classmethod
-    def from_signed_file(cls, profile: Profile, path: str) -> 'Message':
-        """
-        Create a Message object from a file and its signature.
-
-        Parameters:
-        - profile: the GitHub profile of the user who signed this document
-        - path: path to the document which was signed
-
-        Assumptions:
-        The document referenced by `path` should have been signed (using wmap)
-        prior to calling this method. In particular, an OpenSSH-formatted
-        signature file should exist on disk at `path`.sig.
-        """
-        with open(path, 'rb') as f:
-            body = f.read()
-        signature = Signature.load(path + ".sig")
-        return cls(profile, body, signature)
-
-    @classmethod
-    def load(cls, path: str) -> 'Message':
-        """
-        Load an existing JSON-formatted WMAP message from disk.
-
-        Parameters:
-        - path: path to the JSON-formatted WMAP message
-        """
-        with open(path) as f:
-            d = json.load(f)
-            profile = Profile(d['profile'])
-            signature = Signature(d['signature'])
-            body = base64.b64decode(d['body'])
-            return cls(profile, body, signature)
-
-    def into_dict(self) -> dict[str, str]:
-        """
-        Convert this object into a python dictionary, and convert each of its
-        fields into their string representation.
-        """
-        return {
-            'profile': str(self.profile),
-            'body': str(base64.b64encode(self.body), 'utf-8'),
-            'signature': str(self.signature)
-        }
-
-    def dump(self, path: str):
-        """
-        Store this message on disk.
-
-        Parameters:
-        - path: path on disk where this JSON-formatted WMAP message should be
-          written.
-        """
-        with open(path, 'w') as f:
-            json.dump(self.into_dict(), f)
 
 
 if __name__ == "__main__":  # pragma: no cover
