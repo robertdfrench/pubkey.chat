@@ -345,14 +345,12 @@ class Bucket:
     def write_message(self, msg: 'Message'):
         msg_id = msg.digest()
         self.s3.write(f"/messages/{msg_id}", msg.dumps())
-
-        try:
-            interior = msg.interior()
-            head = self.s3.read(f"/topics/{interior.topic}")
-            if interior.parent == head:
-                self.s3.write(f"/topics/{interior.topic}", msg_id)
-        except Exception:
-            pass
+        interior = msg.interior()
+        head = self.s3.read(f"/topics/{interior.topic}")
+        if not head:
+            self.s3.write(f"/topics/{interior.topic}", msg_id)
+        if interior.parent == head:
+            self.s3.write(f"/topics/{interior.topic}", msg_id)
 
 
 @dataclass
@@ -655,7 +653,7 @@ class Queue():
     def messages(self):
         while True:
             candidates = self.sqs.receive(1)
-            if len(candidates) == 0:
+            if len(candidates) == 0:  # pragma: no cover
                 continue
             message = candidates[0]
             yield Message.from_dict(json.loads(message['Body']))

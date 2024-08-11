@@ -6,6 +6,7 @@
 import pytest
 import typing
 import json
+from dataclasses import dataclass
 from . import pkc
 
 
@@ -102,21 +103,17 @@ def test_post_message():
             }
 
 class MockSQSWrapper:
-    def __init__(self, name: str, messages: list[dict]):
-        self.name = name
+    def __init__(self, messages: list[dict]):
         self.messages = list(messages)
         self.messages.reverse()
-        self.max_messages = []
-        self.receipt_handles = []
 
-    def receive(self, max_messages: int):
-        self.max_messages.append(max_messages)
+    def receive(self, _max_messages: int):
         if len(self.messages) == 0:
             raise Exception("End of test")
         return [self.messages.pop()]
 
-    def delete(self, receipt_handle: str):
-        self.receipt_handles.append(receipt_handle)
+    def delete(self, _receipt_handle: str):
+        pass
 
 def test_queue_iterate():
     msg_json_1 = '{"profile": "a", "body": "b", "signature": "c"}'
@@ -125,7 +122,7 @@ def test_queue_iterate():
             {'Body': msg_json_1, 'ReceiptHandle': 'a'},
             {'Body': msg_json_2, 'ReceiptHandle': 'b'},
         ]
-    sqs = MockSQSWrapper("https://example.com/q", messages)
+    sqs = MockSQSWrapper(messages)
     queue = pkc.Queue(sqs)
     bodies = []
     try:
@@ -135,3 +132,40 @@ def test_queue_iterate():
         assert(str(e) == "End of test")
     assert bodies[0] == 'b'
     assert bodies[1] == 'e'
+
+@dataclass
+class MockS3Wrapper:
+    contents: dict[str, str]
+
+    def write(self, key: str, value: str):
+        self.contents[key] = value
+
+    def read(self, key: str) -> str | None:
+        return self.contents.get(key, None)
+
+def test_bucket_write_message():
+    interior = {"topic": "math", "data": "I love math", "parent": ""}
+    msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
+    message = pkc.Message.from_dict(msg_dict)
+    s3 = MockS3Wrapper(dict())
+    bucket = pkc.Bucket(s3)
+    bucket.write_message(message)
+    assert s3.contents['/messages/502217a81ca8d389786c82c7cf1e20f4d1fa3faf6429572c1476cdeca941ed0c']
+    assert s3.contents['/topics/math'] == \
+        "502217a81ca8d389786c82c7cf1e20f4d1fa3faf6429572c1476cdeca941ed0c"
+
+def test_bucket_update_topic():
+    interior = {"topic": "math", "data": "I love math", "parent": "x"}
+    msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
+    message = pkc.Message.from_dict(msg_dict)
+    s3 = MockS3Wrapper({"/topics/math": "x"})
+    bucket = pkc.Bucket(s3)
+    bucket.write_message(message)
+    assert s3.contents['/topics/math'] == \
+        "da9d29ca29888d1c81bbf3a7bf3ff2ef01f3f6de8a6f273e38104a4355872e7b"
+
+
+def test_message_is_valid():
+    profile = pkc.Profile("robertdfrench")
+    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    assert message.is_valid()
