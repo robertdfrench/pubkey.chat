@@ -182,7 +182,6 @@ class AuthorizedKey:
         material = self.material
         return f"{principal} namespaces=\"{NAMESPACE}\" {algorithm} {material}"
 
-
 @dataclass
 class Profile:
     """

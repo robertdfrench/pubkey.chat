@@ -36,8 +36,8 @@ build {
   }
 
   provisioner "file" {
-    source = "service.py"
-    destination = "service.py"
+    source = "build/pubkey.chat"
+    destination = "pubkey.chat"
   }
 
   provisioner "shell" {

@@ -20,9 +20,11 @@ interface, cryptographic operations, and file handling.
 """
 import argparse
 import base64
+import configparser
 import curses
 from dataclasses import dataclass
 from enum import Enum, auto
+import hashlib
 import json
 from typing import List
 import os
@@ -94,6 +96,12 @@ def main():  # pragma: no cover
     parser_extract.add_argument(
             'file', type=str, help='Signed file to be extracted')
 
+    # Setup subparser for the 'service' command
+    parser_service = subparsers.add_parser(
+            'service', help='validate incoming messages')
+    parser_service.add_argument(
+            'config', type=str, help='Path to config file')
+
     # Setup subparser for the 'sign' command
     parser_sign = subparsers.add_parser(
             'sign', help='Sign a file')
@@ -118,6 +126,8 @@ def main():  # pragma: no cover
         chat(args.username, args.key, args.topic)
     elif args.command == 'extract':
         extract(args.file, args.skip_validation)
+    elif args.command == 'service':
+        service(args.config)
     elif args.command == 'sign':
         sign(args.username, args.key, args.file)
     elif args.command == 'verify':
@@ -172,6 +182,24 @@ def extract(file: str, skip_validation: bool = False):  # pragma: no cover
     # If the message has a good signature, extract and print the body
     message = Message.load(file)
     print(str(message.body, 'utf-8'))
+
+
+def service(config_path: str):  # pragma: no cover
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    s3 = S3Wrapper(
+        config['DEFAULT']['region'],
+        config['DEFAULT']['bucket_name']
+    )
+    bucket = Bucket(s3)
+    sqs = SQSWrapper(
+        config['DEFAULT']['region'],
+        config['DEFAULT']['queue_name']
+    )
+    queue = Queue(sqs)
+    for message in queue.messages():
+        if message.is_valid():
+            bucket.write_message(message)
 
 
 def sign(username: str, key: str, file: str):  # pragma: no cover
@@ -311,6 +339,23 @@ class AuthorizedKey:
 
 
 @dataclass
+class Bucket:
+    s3: 'S3Wrapper'
+
+    def write_message(self, msg: 'Message'):
+        msg_id = msg.digest()
+        self.s3.write(f"/messages/{msg_id}", msg.dumps())
+
+        try:
+            interior = msg.interior()
+            head = self.s3.read(f"/topics/{interior.topic}")
+            if interior.parent == head:
+                self.s3.write(f"/topics/{interior.topic}", msg_id)
+        except Exception:
+            pass
+
+
+@dataclass
 class ChatAPIClient:
     """
     Raw operations with the Chat Service backend
@@ -333,15 +378,8 @@ class ChatAPIClient:
         return self.rest_client.post_json(url, payload)
 
 
-@dataclass
-class SessionUser:
-    username: str
-    key: str
-    topic: str
-
-
 class ChatSession:  # pragma: no cover
-    def __init__(self, stdscr, user: SessionUser):
+    def __init__(self, stdscr, user: 'SessionUser'):
         self.stdscr = stdscr
         self.user = user
         self.current_input = ""
@@ -370,7 +408,6 @@ class ChatSession:  # pragma: no cover
             sign(self.user.username, self.user.key, f.name)
             msg = Message.load(f.name + ".wmap")
             self.client.post_message(msg)
-
 
     def update_messages(self):
         parent = self.client.get_head(self.user.topic)
@@ -411,17 +448,10 @@ class ChatSession:  # pragma: no cover
 
 
 @dataclass
-class RestClient:  # pragma: no cover
-    def get(self, url: str) -> str:
-        with request.urlopen(url) as response:
-            return response.read().decode()
-
-    def post_json(self, url: str, payload: dict) -> str:
-        data = json.dumps(payload).encode()
-        headers = {'Content-Type': 'application/json'}
-        r = request.Request(url, data=data, headers=headers, method='POST')
-        with request.urlopen(r) as response:
-            return response.read().decode()
+class InteriorMessage:
+    topic: str
+    parent: str
+    data: str
 
 
 @dataclass
@@ -451,6 +481,13 @@ class Message:
         with open(path, 'rb') as f:
             body = f.read()
         signature = Signature.load(path + ".sig")
+        return cls(profile, body, signature)
+
+    @classmethod
+    def from_dict(cls, parts: dict[str, str]) -> 'Message':
+        profile = Profile(parts['profile'])
+        body = parts['body'].encode()
+        signature = Signature(parts['signature'])
         return cls(profile, body, signature)
 
     @classmethod
@@ -505,6 +542,21 @@ class Message:
         Convert this message to a json string
         """
         return json.dumps(self.into_dict())
+
+    def is_valid(self) -> bool:
+        with tempfile.NamedTemporaryFile() as sigfile:
+            self.signature.dump(sigfile.name)
+            sigfile.flush()
+            return self.profile.verify_signed_data(self.body, sigfile.name)
+
+    def interior(self) -> InteriorMessage:
+        i = json.loads(self.body)
+        return InteriorMessage(i['topic'], i['parent'], i['data'])
+
+    def digest(self) -> str:
+        digest = hashlib.sha256()
+        digest.update(self.dumps().encode())
+        return digest.hexdigest()
 
 
 @dataclass
@@ -597,6 +649,62 @@ class PrivateKey:
 
 
 @dataclass
+class Queue():
+    sqs: 'SQSWrapper'
+
+    def messages(self):
+        while True:
+            candidates = self.sqs.receive(1)
+            if len(candidates) == 0:
+                continue
+            message = candidates[0]
+            yield Message.from_dict(json.loads(message['Body']))
+            self.sqs.delete(message['ReceiptHandle'])
+
+
+@dataclass
+class RestClient:  # pragma: no cover
+    def get(self, url: str) -> str:
+        with request.urlopen(url) as response:
+            return response.read().decode()
+
+    def post_json(self, url: str, payload: dict) -> str:
+        data = json.dumps(payload).encode()
+        headers = {'Content-Type': 'application/json'}
+        r = request.Request(url, data=data, headers=headers, method='POST')
+        with request.urlopen(r) as response:
+            return response.read().decode()
+
+
+class S3Wrapper:  # pragma: no cover
+    def __init__(self, region, name):
+        import boto3  # type: ignore
+        self.client = boto3.client('s3', region_name=region)
+        self.name = name
+
+    def write(self, key: str, value: str):
+        self.client.put_object(
+            Bucket=self.name,
+            Key=key,
+            Body=value
+        )
+
+    def read(self, key: str) -> str:
+        response = self.client.get_object(
+            Bucket=self.name,
+            Key=key
+        )
+        return response['Body'].read().decode()
+
+
+@dataclass
+class SessionUser:
+    username: str
+    key: str
+    topic: str
+
+
+@dataclass
 class Signature:
     """
     The output of ssh-keygen -Y sign
@@ -639,6 +747,34 @@ class Signature:
 
     def __str__(self) -> str:
         return self.content
+
+
+class SQSWrapper:  # pragma: no cover
+    name: str
+    region: str
+
+    def __init__(self, region: str, name: str):
+        import boto3  # type: ignore
+        self.client = boto3.client('sqs', region_name=region)
+        self.name = name
+        self.region = region
+
+    def receive(self, max_messages: int) -> List[dict]:
+        response = self.client.receive_message(
+            QueueUrl=self.name,
+            MaxNumberOfMessages=max_messages,
+            WaitTimeSeconds=20
+        )
+        return response.get('Messages', [])
+
+    def delete(self, receipt_handle: str):
+        self.client.delete_message(
+            QueueUrl=self.name,
+            ReceiptHandle=receipt_handle
+        )
+
+    def __repr__(self) -> str:
+        return f"SQSWrapper({self.region}, {self.name})"
 
 
 if __name__ == "__main__":  # pragma: no cover

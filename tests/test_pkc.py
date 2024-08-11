@@ -100,3 +100,38 @@ def test_post_message():
                 'body': 'Yg==',
                 'signature': 'c'
             }
+
+class MockSQSWrapper:
+    def __init__(self, name: str, messages: list[dict]):
+        self.name = name
+        self.messages = list(messages)
+        self.messages.reverse()
+        self.max_messages = []
+        self.receipt_handles = []
+
+    def receive(self, max_messages: int):
+        self.max_messages.append(max_messages)
+        if len(self.messages) == 0:
+            raise Exception("End of test")
+        return [self.messages.pop()]
+
+    def delete(self, receipt_handle: str):
+        self.receipt_handles.append(receipt_handle)
+
+def test_queue_iterate():
+    msg_json_1 = '{"profile": "a", "body": "b", "signature": "c"}'
+    msg_json_2 = '{"profile": "d", "body": "e", "signature": "f"}'
+    messages = [
+            {'Body': msg_json_1, 'ReceiptHandle': 'a'},
+            {'Body': msg_json_2, 'ReceiptHandle': 'b'},
+        ]
+    sqs = MockSQSWrapper("https://example.com/q", messages)
+    queue = pkc.Queue(sqs)
+    bodies = []
+    try:
+        for message in queue.messages():
+            bodies.append(message.body.decode())
+    except Exception as e:
+        assert(str(e) == "End of test")
+    assert bodies[0] == 'b'
+    assert bodies[1] == 'e'

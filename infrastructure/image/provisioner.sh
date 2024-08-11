@@ -5,7 +5,7 @@ sudo yum install -y \
 	python3-boto3 \
 	openssh
 
-sudo mv service.py /usr/local/bin/service.py
+sudo mv pubkey.chat /usr/local/bin/pubkey.chat
 
 sudo mv chat.service /etc/systemd/system/chat.service
 sudo systemctl daemon-reload

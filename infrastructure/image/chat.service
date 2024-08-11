@@ -3,7 +3,7 @@ Description=Chat Service
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /usr/local/bin/service.py
+ExecStart=/usr/bin/python3 /usr/local/bin/pubkey.chat service /etc/chat.ini
 Restart=always
 User=nobody
 

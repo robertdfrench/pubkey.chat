@@ -1,6 +1,6 @@
 include ../../common.mk
 
-SOURCES = chat.service provisioner.sh service.py packer.pkr.hcl
+SOURCES = chat.service provisioner.sh build/pubkey.chat packer.pkr.hcl
 
 test: #: Run a fake test
 	@echo "okay!"
@@ -26,5 +26,8 @@ build/variables.pkrvars.hcl: build/ami_name.txt
 
 build/ami_name.txt: $(SOURCES) build/.dir
 	cat $(SOURCES) | shasum -a 256 | sed 's/  -//; s/^/chat-service-/' > $@
+
+build/pubkey.chat: ../../pubkey.chat build/.dir
+	cp $< $@
 
 clean: clean_build #: Clean up intermediate artifacts
