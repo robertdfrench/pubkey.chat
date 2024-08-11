@@ -18,3 +18,7 @@ lint: .venv/ready
 
 typecheck: .venv/ready
 	$(venv) mypy pubkey.chat
+
+review_coverage: .venv/ready
+	$(venv) pytest --cov=. --cov-report=html
+	open htmlcov/index.html
