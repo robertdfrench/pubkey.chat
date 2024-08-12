@@ -148,7 +148,7 @@ def test_bucket_write_message():
     msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper(dict())
-    bucket = pkc.Bucket(s3)
+    bucket = pkc.PublicChatBucket(s3)
     bucket.write_message(message)
     assert s3.contents['/messages/502217a81ca8d389786c82c7cf1e20f4d1fa3faf6429572c1476cdeca941ed0c']
     assert s3.contents['/topics/math'] == \
@@ -159,7 +159,7 @@ def test_bucket_update_topic():
     msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper({"/topics/math": "x"})
-    bucket = pkc.Bucket(s3)
+    bucket = pkc.PublicChatBucket(s3)
     bucket.write_message(message)
     assert s3.contents['/topics/math'] == \
         "da9d29ca29888d1c81bbf3a7bf3ff2ef01f3f6de8a6f273e38104a4355872e7b"

@@ -201,7 +201,7 @@ def service_cmd(config_path: str):  # pragma: no cover
         config['DEFAULT']['region'],
         config['DEFAULT']['bucket_name']
     )
-    bucket = Bucket(s3)
+    bucket = PublicChatBucket(s3)
     sqs = SQSWrapper(
         config['DEFAULT']['region'],
         config['DEFAULT']['queue_name']
@@ -262,7 +262,7 @@ def verify_cmd(file: str):  # pragma: no cover
         sys.exit(1)
 
 
-class Algorithm(Enum):
+class SigningAlgorithm(Enum):
     """
     Allowable algorithms for SSH signing keys.
 
@@ -274,9 +274,10 @@ class Algorithm(Enum):
     ED25519 = auto()
 
     @classmethod
-    def parse(cls, string: str) -> 'Algorithm':
+    def parse(cls, string: str) -> 'SigningAlgorithm':
         """
-        Attempt to parse a string into one of these Algorithm enum instances.
+        Attempt to parse a string into one of these SigningAlgorithm enum
+        instances.
 
         Parameters:
         - string: a string which may or may not be a valid SSH signing
@@ -293,9 +294,9 @@ class Algorithm(Enum):
             raise Exception("Unknown ssh key algorithm")
 
     def __str__(self):
-        if self == Algorithm.RSA:
+        if self == SigningAlgorithm.RSA:
             return "ssh-rsa"
-        if self == Algorithm.ED25519:
+        if self == SigningAlgorithm.ED25519:
             return "ssh-ed25519"
 
 
@@ -308,7 +309,7 @@ class AuthorizedKey:
     See the AUTHORIZED_KEYS_FILE_FORMAT section of the sshd(8) man page for
     more information about what these files look like.
     """
-    algorithm: Algorithm
+    algorithm: SigningAlgorithm
     material: str
     comment: str
 
@@ -325,7 +326,7 @@ class AuthorizedKey:
           entry.
         """
         parts = string.split()
-        algorithm = Algorithm.parse(parts[0])
+        algorithm = SigningAlgorithm.parse(parts[0])
         return cls(algorithm, parts[1], " ".join(parts[2:]))
 
     def into_allowed_signer(self, profile: 'Profile') -> str:
@@ -349,7 +350,7 @@ class AuthorizedKey:
 
 
 @dataclass
-class Bucket:
+class PublicChatBucket:
     s3: 'S3Wrapper'
 
     def write_message(self, msg: 'SignedMessage'):

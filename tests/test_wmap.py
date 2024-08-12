@@ -34,14 +34,15 @@ def ssh_private_key_path():
 
 def test_algorithm_parse():
     """
-    Ensure that we can parse ssh key algorithm strings into Algorithm enums.
+    Ensure that we can parse ssh key algorithm strings into SigningAlgorithm
+    enums.
     """
-    rsa = pkc.Algorithm.parse("ssh-rsa")
-    assert rsa == pkc.Algorithm.RSA
-    ed25519 = pkc.Algorithm.parse("ssh-ed25519")
-    assert ed25519 == pkc.Algorithm.ED25519
+    rsa = pkc.SigningAlgorithm.parse("ssh-rsa")
+    assert rsa == pkc.SigningAlgorithm.RSA
+    ed25519 = pkc.SigningAlgorithm.parse("ssh-ed25519")
+    assert ed25519 == pkc.SigningAlgorithm.ED25519
     with pytest.raises(Exception):
-        pkc.Algorithm.parse("ssh-junk")
+        pkc.SigningAlgorithm.parse("ssh-junk")
 
 
 def test_authorized_key_parse_algorithm():
@@ -50,7 +51,7 @@ def test_authorized_key_parse_algorithm():
     object, with each field intact.
     """
     key = pkc.AuthorizedKey.parse("ssh-rsa abc123 blah blah blah")
-    assert key.algorithm == pkc.Algorithm.RSA
+    assert key.algorithm == pkc.SigningAlgorithm.RSA
     assert key.material == "abc123"
     assert key.comment == "blah blah blah"
 
