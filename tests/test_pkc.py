@@ -169,3 +169,26 @@ def test_message_is_valid():
     profile = pkc.Profile("robertdfrench")
     message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     assert message.is_valid()
+
+
+def test_interior_dumps():
+    x = pkc.InteriorMessage("a", "b", "c")
+    assert x.dumps() == '{"topic": "a", "parent": "b", "text": "c"}'
+
+def test_chat_session_interior():
+    s = pkc.ChatSession("a", "b", "c")
+    i = s.new_interior_message("d")
+    assert i.topic == "c"
+    assert i.parent == ""
+    assert i.text == "d"
+
+def test_chat_session_history():
+    s = pkc.ChatSession("a", "b", "c")
+    s.history = ["1", "2", "3", "4", "5"]
+    assert s.get_history(3) == ["3", "4", "5"]
+
+def test_chat_session_update():
+    s = pkc.ChatSession("a", "b", "c")
+    assert s.update_parent("x")
+    assert s.parent == "x"
+    assert not s.update_parent("x")

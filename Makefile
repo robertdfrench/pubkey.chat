@@ -19,6 +19,6 @@ lint: .venv/ready
 typecheck: .venv/ready
 	$(venv) mypy pubkey.chat
 
-review_coverage: .venv/ready
+review_coverage: .venv/ready  #: Show coverage report in browser
 	$(venv) pytest --cov=. --cov-report=html
 	open htmlcov/index.html

@@ -146,12 +146,12 @@ def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
     - topic: The room you'd like to join
     """
     def chat_main(stdscr):
-        user = SessionUser(username, key, topic)
-        session = ChatSession(stdscr, user)
+        user = ChatSession(username, key, topic)
+        interface = ChatInterface(stdscr, user)
 
         def update_messages():
             while True:
-                session.update_messages()
+                interface.update_messages()
                 time.sleep(2)
 
         comms_thread = threading.Thread(target=update_messages)
@@ -159,8 +159,8 @@ def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
         comms_thread.start()
 
         while True:
-            session.redraw()
-            session.check_input()
+            interface.redraw()
+            interface.check_input()
             time.sleep(0.016)
 
     curses.wrapper(chat_main)
@@ -388,13 +388,11 @@ class ChatAPIClient:
         return self.rest_client.post_json(url, payload)
 
 
-class ChatSession:  # pragma: no cover
-    def __init__(self, stdscr, user: 'SessionUser'):
+class ChatInterface:  # pragma: no cover
+    def __init__(self, stdscr, session: 'ChatSession'):
         self.stdscr = stdscr
-        self.user = user
+        self.session = session
         self.current_input = ""
-        self.messages: list[str] = []
-        self.parent = ""
         self.client = ChatAPIClient(API_BASE_URL, RestClient())
 
         curses.curs_set(0)  # Hide cursor
@@ -404,37 +402,37 @@ class ChatSession:  # pragma: no cover
         self.messages_win = curses.newwin(curses.LINES - 3, curses.COLS, 0, 0)
         self.input_win = curses.newwin(3, curses.COLS, curses.LINES - 3, 0)
 
-        self.input_win.addstr(1, 1, "> ")
+        self.draw_input_window()
+
+    def draw_input_window(self):
+        self.input_win.addstr(1, 1, f"> {self.current_input}")
         self.input_win.refresh()
 
-    def post_message(self, text):
-        interior = dict()
-        interior['topic'] = self.user.topic
-        interior['parent'] = self.parent
-        interior['data'] = text
+    def post_message(self, text: str):
+        interior = self.session.new_interior_message(text)
         with tempfile.NamedTemporaryFile() as f:
-            f.write(bytes(json.dumps(interior), 'utf-8'))
+            f.write(interior.dumps().encode())
             f.flush()
-            sign_cmd(self.user.username, self.user.key, f.name)
+            sign_cmd(self.session.username, self.session.key_path, f.name)
             msg = SignedMessage.load(f.name + ".wmap")
             self.client.post_message(msg)
 
     def update_messages(self):
-        parent = self.client.get_head(self.user.topic)
-        if parent != self.parent:
-            self.parent = parent
-            msg = self.client.get_message(parent)
-            interior = json.loads(msg.body.decode())
-            self.messages.append(
-                msg.profile.username + ": " + interior['data']
-            )
+        # This can lose messages
+        current_parent = self.client.get_head(self.session.topic)
+        if self.session.update_parent(current_parent):
+            head_msg = self.client.get_message(current_parent)
+            username = head_msg.profile.username
+            interior_text = head_msg.interior().text
+            self.history.append(f"{username}: {interior_text}")
 
     def redraw(self):
         self.messages_win.clear()
-        self.input_win.clear()
-        self.input_win.addstr(1, 1, f"> {self.current_input}")
-        for i, msg in enumerate(self.messages[-(curses.LINES - 3):]):
-            self.messages_win.addstr(i, 0, msg)
+        self.input_win.clear()  # maybe not the first time?
+        self.draw_input_window()
+        display_history = self.session.get_history(curses.LINES - 3)
+        for i, text in enumerate(display_history):
+            self.messages_win.addstr(i, 0, text)
         self.messages_win.refresh()
         self.input_win.refresh()
 
@@ -461,7 +459,17 @@ class ChatSession:  # pragma: no cover
 class InteriorMessage:
     topic: str
     parent: str
-    data: str
+    text: str
+
+    def into_dict(self) -> dict[str, str]:
+        return {
+                'topic': self.topic,
+                'parent': self.parent,
+                'text': self.text
+        }
+
+    def dumps(self) -> str:
+        return json.dumps(self.into_dict())
 
 
 @dataclass
@@ -707,11 +715,31 @@ class S3Wrapper:  # pragma: no cover
         return response['Body'].read().decode()
 
 
-@dataclass
-class SessionUser:
+class ChatSession:
     username: str
-    key: str
+    key_path: str
     topic: str
+    history: list[str]
+    parent: str
+
+    def __init__(self, username: str, key_path: str, topic: str):
+        self.username = username
+        self.key_path = key_path
+        self.topic = topic
+        self.history = []
+        self.parent = ""
+
+    def new_interior_message(self, text: str) -> InteriorMessage:
+        return InteriorMessage(self.topic, self.parent, text)
+
+    def get_history(self, n) -> list[str]:
+        return self.history[-n:]
+
+    def update_parent(self, new_parent) -> bool:
+        if new_parent != self.parent:
+            self.parent = new_parent
+            return True
+        return False
 
 
 @dataclass
