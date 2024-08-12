@@ -44,7 +44,7 @@ def test_loads_message():
     Load a message from a string
     """
     text = "{\"profile\": \"a\", \"body\": \"Yg==\", \"signature\": \"c\"}"
-    message = pkc.Message.loads(text)
+    message = pkc.SignedMessage.loads(text)
     assert message.profile.username == "a"
     assert message.body == b'b'
     assert message.signature.content == "c"
@@ -55,7 +55,7 @@ def test_dumps_message():
     Load a message from a string
     """
     text = "{\"profile\": \"a\", \"body\": \"Yg==\", \"signature\": \"c\"}"
-    message = pkc.Message.loads(text)
+    message = pkc.SignedMessage.loads(text)
     assert message.dumps() == text
 
 
@@ -94,7 +94,7 @@ def test_post_message():
     rest_client = FakeRestClient([""])
     client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
     text = "{\"profile\": \"a\", \"body\": \"Yg==\", \"signature\": \"c\"}"
-    message = pkc.Message.loads(text)
+    message = pkc.SignedMessage.loads(text)
     client.post_message(message)
     assert rest_client.payloads[0] == {
                 'profile': 'a',
@@ -146,7 +146,7 @@ class MockS3Wrapper:
 def test_bucket_write_message():
     interior = {"topic": "math", "data": "I love math", "parent": ""}
     msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
-    message = pkc.Message.from_dict(msg_dict)
+    message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper(dict())
     bucket = pkc.Bucket(s3)
     bucket.write_message(message)
@@ -157,7 +157,7 @@ def test_bucket_write_message():
 def test_bucket_update_topic():
     interior = {"topic": "math", "data": "I love math", "parent": "x"}
     msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
-    message = pkc.Message.from_dict(msg_dict)
+    message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper({"/topics/math": "x"})
     bucket = pkc.Bucket(s3)
     bucket.write_message(message)
@@ -167,5 +167,5 @@ def test_bucket_update_topic():
 
 def test_message_is_valid():
     profile = pkc.Profile("robertdfrench")
-    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     assert message.is_valid()

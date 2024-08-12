@@ -156,11 +156,11 @@ def test_profile_verify_signed_file():
 
 def test_message_load_from_files():
     """
-    Show that we can construt a Message object from a file, a profile, and a
-    signature.
+    Show that we can construt a SignedMessage object from a file, a profile,
+    and a signature.
     """
     profile = pkc.Profile("robertdfrench")
-    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     assert message.profile == profile
     assert message.body == b'My name is Robert French, and I hope you think WMAP is as neat as I do!\n'  # noqa: E501
     assert message.signature == pkc.Signature.load("tests/message.txt.sig")
@@ -168,13 +168,13 @@ def test_message_load_from_files():
 
 def test_message_into_dict():
     """
-    Show that we can turn a Message object into a python dictionary (which
-    would then be turned into JSON). The body and signature here are
+    Show that we can turn a SignedMessage object into a python dictionary
+    (which would then be turned into JSON). The body and signature here are
     base64-encoded versions of the tests/messages.txt and
     tests/messages.txt.sig files, respectively.
     """
     profile = pkc.Profile("robertdfrench")
-    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     d = message.into_dict()
     assert d['profile'] == "robertdfrench"
     assert d['body'] == "TXkgbmFtZSBpcyBSb2JlcnQgRnJlbmNoLCBhbmQgSSBob3BlIHlvdSB0aGluayBXTUFQIGlzIGFzIG5lYXQgYXMgSSBkbyEK"  # noqa: E501
@@ -183,13 +183,13 @@ def test_message_into_dict():
 
 def test_message_dump():
     """
-    Show that we once we write a Message object to disk, it can be loaded into
-    memory as a dictionary (via json.load) whose fields should match the values
-    below.  The body and signature here are base64-encoded versions of the
-    tests/messages.txt and tests/messages.txt.sig files, respectively.
+    Show that we once we write a SignedMessage object to disk, it can be loaded
+    into memory as a dictionary (via json.load) whose fields should match the
+    values below.  The body and signature here are base64-encoded versions of
+    the tests/messages.txt and tests/messages.txt.sig files, respectively.
     """
     profile = pkc.Profile("robertdfrench")
-    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     with tempfile.NamedTemporaryFile() as f:
         message.dump(f.name)
         with open(f.name) as message:
@@ -201,14 +201,14 @@ def test_message_dump():
 
 def test_message_load():
     """
-    Show that we can load a Message object from disk. We compare that object to
-    its constituent parts.
+    Show that we can load a SignedMessage object from disk. We compare that
+    object to its constituent parts.
     """
     profile = pkc.Profile("robertdfrench")
     signature = pkc.Signature.load("tests/message.txt.sig")
-    message = pkc.Message.from_signed_file(profile, "tests/message.txt")
+    message = pkc.SignedMessage.from_raw_parts(profile, "tests/message.txt")
     with tempfile.NamedTemporaryFile() as f:
         message.dump(f.name)
-        message = pkc.Message.load(f.name)
+        message = pkc.SignedMessage.load(f.name)
         assert message.profile == profile
         assert message.signature == signature

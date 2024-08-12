@@ -123,20 +123,20 @@ def main():  # pragma: no cover
     # Call the appropriate function based on the subcommand. Each subcommand is
     # handled by its own function, and each expects different arguments.
     if args.command == 'chat':
-        chat(args.username, args.key, args.topic)
+        chat_cmd(args.username, args.key, args.topic)
     elif args.command == 'extract':
-        extract(args.file, args.skip_validation)
+        extract_cmd(args.file, args.skip_validation)
     elif args.command == 'service':
-        service(args.config)
+        service_cmd(args.config)
     elif args.command == 'sign':
-        sign(args.username, args.key, args.file)
+        sign_cmd(args.username, args.key, args.file)
     elif args.command == 'verify':
-        verify(args.file)
+        verify_cmd(args.file)
     else:
         parser.print_help()
 
 
-def chat(username: str, key: str, topic: str):  # pragma: no cover
+def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
     """
     Open a chat window for 'topic'
 
@@ -166,7 +166,7 @@ def chat(username: str, key: str, topic: str):  # pragma: no cover
     curses.wrapper(chat_main)
 
 
-def extract(file: str, skip_validation: bool = False):  # pragma: no cover
+def extract_cmd(file: str, skip_validation: bool = False):  # pragma: no cover
     """
     Verify, decode, and print the body of a WMAP-formatted file.
 
@@ -178,13 +178,23 @@ def extract(file: str, skip_validation: bool = False):  # pragma: no cover
     user interface.
     """
     if not skip_validation:  # Read this as 'if validate == True'
-        verify(file)
+        verify_cmd(file)
     # If the message has a good signature, extract and print the body
-    message = Message.load(file)
+    message = SignedMessage.load(file)
     print(str(message.body, 'utf-8'))
 
 
-def service(config_path: str):  # pragma: no cover
+def service_cmd(config_path: str):  # pragma: no cover
+    """
+    Launch the chat service
+
+    Parameters:
+    - config_path: path to the chat service's config file
+
+    The config file should spell out the AWS Region ('region'), name of an S3
+    bucket into which messages will be written ('bucket_name'), and the name of
+    an SQS queue from which messages will be pulled ('queue_name').
+    """
     config = configparser.ConfigParser()
     config.read(config_path)
     s3 = S3Wrapper(
@@ -202,7 +212,7 @@ def service(config_path: str):  # pragma: no cover
             bucket.write_message(message)
 
 
-def sign(username: str, key: str, file: str):  # pragma: no cover
+def sign_cmd(username: str, key: str, file: str):  # pragma: no cover
     """
     Sign a file using the specified GitHub username and SSH key.
 
@@ -222,13 +232,13 @@ def sign(username: str, key: str, file: str):  # pragma: no cover
     profile = Profile(username)             # Load *your* github Profile
     private_key = PrivateKey(profile, key)  # Load *your* SSH Private Key
     private_key.sign(file)                  # Sign `file` with your SSH key
-    message = Message.from_signed_file(
+    message = SignedMessage.from_raw_parts(
             profile, file)                  # Load everything into one object
     message.dump(file + ".wmap")            # Write WMAP-formatted msg to disk
     os.remove(file + ".sig")                # Remove temporary sig file
 
 
-def verify(file: str):  # pragma: no cover
+def verify_cmd(file: str):  # pragma: no cover
     """
     Verify the signature of a WMAP-formatted file.
 
@@ -242,7 +252,7 @@ def verify(file: str):  # pragma: no cover
     user interface.
     """
     sigfile = file + ".sig"
-    message = Message.load(file)     # Load message from disk
+    message = SignedMessage.load(file)     # Load message from disk
     message.signature.dump(sigfile)  # Extract signature temporarily
     valid = message.profile.verify_signed_data(
             message.body, sigfile)   # Check signature against profile & body
@@ -342,7 +352,7 @@ class AuthorizedKey:
 class Bucket:
     s3: 'S3Wrapper'
 
-    def write_message(self, msg: 'Message'):
+    def write_message(self, msg: 'SignedMessage'):
         msg_id = msg.digest()
         self.s3.write(f"/messages/{msg_id}", msg.dumps())
         interior = msg.interior()
@@ -361,18 +371,19 @@ class ChatAPIClient:
     api_base_url: str
     rest_client: 'RestClient'
 
-    def get_message(self, message_id: str) -> 'Message':
+    def get_message(self, message_id: str) -> 'SignedMessage':
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
-        return Message.loads(msg_text)
+        return SignedMessage.loads(msg_text)
 
     def get_head(self, topic: str) -> str:
         url = f"{self.api_base_url}/topics/{topic}"
         return self.rest_client.get(url).rstrip()
 
-    def post_message(self, message: 'Message') -> str:
+    def post_message(self, message: 'SignedMessage') -> str:
         url = f"{self.api_base_url}/messages"
         payload = message.into_dict()
+        message.dump("chat.wmap")
         return self.rest_client.post_json(url, payload)
 
 
@@ -403,8 +414,8 @@ class ChatSession:  # pragma: no cover
         with tempfile.NamedTemporaryFile() as f:
             f.write(bytes(json.dumps(interior), 'utf-8'))
             f.flush()
-            sign(self.user.username, self.user.key, f.name)
-            msg = Message.load(f.name + ".wmap")
+            sign_cmd(self.user.username, self.user.key, f.name)
+            msg = SignedMessage.load(f.name + ".wmap")
             self.client.post_message(msg)
 
     def update_messages(self):
@@ -453,7 +464,7 @@ class InteriorMessage:
 
 
 @dataclass
-class Message:
+class SignedMessage:
     """
     A signed copy of the original content, which can be shared with and
     validated by anyone.
@@ -463,9 +474,9 @@ class Message:
     signature: 'Signature'
 
     @classmethod
-    def from_signed_file(cls, profile: 'Profile', path: str) -> 'Message':
+    def from_raw_parts(cls, profile: 'Profile', path: str) -> 'SignedMessage':
         """
-        Create a Message object from a file and its signature.
+        Create a SignedMessage object from a file and its signature.
 
         Parameters:
         - profile: the GitHub profile of the user who signed this document
@@ -482,14 +493,14 @@ class Message:
         return cls(profile, body, signature)
 
     @classmethod
-    def from_dict(cls, parts: dict[str, str]) -> 'Message':
+    def from_dict(cls, parts: dict[str, str]) -> 'SignedMessage':
         profile = Profile(parts['profile'])
         body = parts['body'].encode()
         signature = Signature(parts['signature'])
         return cls(profile, body, signature)
 
     @classmethod
-    def load(cls, path: str) -> 'Message':
+    def load(cls, path: str) -> 'SignedMessage':
         """
         Load an existing JSON-formatted WMAP message from disk.
 
@@ -500,7 +511,7 @@ class Message:
             return cls.loads(f.read())
 
     @classmethod
-    def loads(cls, data: str) -> 'Message':
+    def loads(cls, data: str) -> 'SignedMessage':
         """
         Load an existing JSON-formatted WMAP message from disk.
 
@@ -656,7 +667,7 @@ class Queue():
             if len(candidates) == 0:  # pragma: no cover
                 continue
             message = candidates[0]
-            yield Message.from_dict(json.loads(message['Body']))
+            yield SignedMessage.from_dict(json.loads(message['Body']))
             self.sqs.delete(message['ReceiptHandle'])
 
 
