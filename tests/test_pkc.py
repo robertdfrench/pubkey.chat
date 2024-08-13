@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
 # Copyright 2024 Robert D. French
+import base64
 import pytest
 import typing
 import json
@@ -116,8 +117,8 @@ class MockSQSWrapper:
         pass
 
 def test_queue_iterate():
-    msg_json_1 = '{"profile": "a", "body": "b", "signature": "c"}'
-    msg_json_2 = '{"profile": "d", "body": "e", "signature": "f"}'
+    msg_json_1 = '{"profile": "a", "body": "Yg==", "signature": "c"}'
+    msg_json_2 = '{"profile": "d", "body": "ZQ==", "signature": "f"}'
     messages = [
             {'Body': msg_json_1, 'ReceiptHandle': 'a'},
             {'Body': msg_json_2, 'ReceiptHandle': 'b'},
@@ -144,25 +145,28 @@ class MockS3Wrapper:
         return self.contents.get(key, None)
 
 def test_bucket_write_message():
-    interior = {"topic": "math", "data": "I love math", "parent": ""}
-    msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
+    interior = {"topic": "math", "text": "I love math", "parent": ""}
+    body = base64.b64encode(json.dumps(interior).encode()).decode()
+    msg_dict = {"profile": "a", "body": body, "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper(dict())
     bucket = pkc.PublicChatBucket(s3)
     bucket.write_message(message)
-    assert s3.contents['/messages/502217a81ca8d389786c82c7cf1e20f4d1fa3faf6429572c1476cdeca941ed0c']
-    assert s3.contents['/topics/math'] == \
-        "502217a81ca8d389786c82c7cf1e20f4d1fa3faf6429572c1476cdeca941ed0c"
+    print(s3.contents.keys())
+    assert s3.contents['messages/2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24']
+    assert s3.contents['topics/math'] == \
+        "2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24"
 
 def test_bucket_update_topic():
-    interior = {"topic": "math", "data": "I love math", "parent": "x"}
-    msg_dict = {"profile": "a", "body": json.dumps(interior), "signature": "b"}
+    interior = {"topic": "math", "text": "I love math", "parent": "x"}
+    body = base64.b64encode(json.dumps(interior).encode()).decode()
+    msg_dict = {"profile": "a", "body": body, "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
-    s3 = MockS3Wrapper({"/topics/math": "x"})
+    s3 = MockS3Wrapper({"topics/math": "x"})
     bucket = pkc.PublicChatBucket(s3)
     bucket.write_message(message)
-    assert s3.contents['/topics/math'] == \
-        "da9d29ca29888d1c81bbf3a7bf3ff2ef01f3f6de8a6f273e38104a4355872e7b"
+    assert s3.contents['topics/math'] == \
+        "1b209d90f7ebcfab4945827cb4f670da6247eee9a4777bc3bafc46805197576b"
 
 
 def test_message_is_valid():
@@ -192,3 +196,12 @@ def test_chat_session_update():
     assert s.update_parent("x")
     assert s.parent == "x"
     assert not s.update_parent("x")
+
+def test_chat_session_append():
+    s = pkc.ChatSession("a", "b", "c")
+    interior = s.new_interior_message("hello")
+    profile = pkc.Profile('user')
+    signature = pkc.Signature('f')
+    msg = pkc.SignedMessage(profile, interior.dumps().encode(), signature)
+    s.append(msg)
+    assert s.history[0] == "user: hello"

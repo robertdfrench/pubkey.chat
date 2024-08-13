@@ -110,7 +110,7 @@ resource "aws_instance" "chat_service_instance" {
   user_data = <<-EOF
               #!/bin/bash
               echo "[DEFAULT]" > /etc/chat.ini
-              echo "queue_url=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
+              echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
               echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
               echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
               systemctl enable chat.service

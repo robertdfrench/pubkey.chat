@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import hashlib
 import json
-from typing import List
+from typing import List, Optional
 import os
 from urllib import request
 import subprocess
@@ -118,6 +118,39 @@ def main():  # pragma: no cover
     parser_verify.add_argument(
             'file', type=str, help='Signed file to be verified')
 
+    # Setup subparser for the 'head' command
+    parser_head = subparsers.add_parser(
+            'head', help='Get HEAD for a topic')
+    parser_head.add_argument(
+            'topic', type=str, help='topic to check')
+
+    # Setup subparser for the 'read' command
+    parser_read = subparsers.add_parser(
+            'read', help='Read the interior of a SignedMessage')
+    parser_read.add_argument(
+            '--skip-validation', action='store_true',
+            help='Something is very wrong if you need to use this flag')
+    parser_read.add_argument(
+            'message_id', type=str, help='message to read')
+
+    # Setup subparser for the 'get' command
+    parser_get = subparsers.add_parser(
+            'get', help='GET the latest message for a topic')
+    parser_get.add_argument(
+            'topic', type=str, help='topic to update')
+
+    # Setup subparser for the 'post' command
+    parser_post = subparsers.add_parser(
+            'post', help='Post some Text')
+    parser_post.add_argument(
+            'topic', type=str, help='topic to update')
+    parser_post.add_argument(
+            'username', type=str, help='GitHub username')
+    parser_post.add_argument(
+            'key', type=str, help='SSH private key to use for posting')
+    parser_post.add_argument(
+            'text', type=str, help='text to be posted')
+
     args = parser.parse_args()
 
     # Call the appropriate function based on the subcommand. Each subcommand is
@@ -132,8 +165,58 @@ def main():  # pragma: no cover
         sign_cmd(args.username, args.key, args.file)
     elif args.command == 'verify':
         verify_cmd(args.file)
+    elif args.command == 'head':
+        head_cmd(args.topic)
+    elif args.command == 'read':
+        read_cmd(args.message_id, args.skip_validation)
+    elif args.command == 'get':
+        get_cmd(args.topic)
+    elif args.command == 'post':
+        post_cmd(args.topic, args.username, args.key, args.text)
     else:
         parser.print_help()
+
+
+def post_cmd(topic: str, user: str, key: str, text: str):  # pragma: no cover
+    client = ChatAPIClient(API_BASE_URL, RestClient())
+    parent = client.get_head(topic)
+    interior = InteriorMessage(topic, parent, text)
+    with tempfile.NamedTemporaryFile() as f:
+        f.write(interior.dumps().encode())
+        f.flush()
+        sign_cmd(user, key, f.name)
+        signed_message = SignedMessage.load(f.name + ".wmap")
+    client = ChatAPIClient(API_BASE_URL, RestClient())
+    client.post_message(signed_message)
+
+
+def get_cmd(topic: str):  # pragma: no cover
+    client = ChatAPIClient(API_BASE_URL, RestClient())
+    message_id = client.get_head(topic)
+    read_cmd(message_id, False)
+
+
+def read_cmd(message_id: str, skip_validation: bool):  # pragma: no cover
+    client = ChatAPIClient(API_BASE_URL, RestClient())
+    message = client.get_message(message_id)
+    if skip_validation:
+        print(message.interior().text)
+    else:
+        if message.is_valid():
+            print(message.interior().text)
+        else:
+            print("Message is not valid")
+
+
+def head_cmd(topic: str):  # pragma: no cover
+    """
+    Get HEAD for a topic
+
+    Parameters:
+    - topic: the topic for which to get HEAD
+    """
+    client = ChatAPIClient(API_BASE_URL, RestClient())
+    print(client.get_head(topic))
 
 
 def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
@@ -208,8 +291,11 @@ def service_cmd(config_path: str):  # pragma: no cover
     )
     queue = Queue(sqs)
     for message in queue.messages():
-        if message.is_valid():
-            bucket.write_message(message)
+        try:
+            if message.is_valid():
+                bucket.write_message(message)
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 def sign_cmd(username: str, key: str, file: str):  # pragma: no cover
@@ -355,13 +441,13 @@ class PublicChatBucket:
 
     def write_message(self, msg: 'SignedMessage'):
         msg_id = msg.digest()
-        self.s3.write(f"/messages/{msg_id}", msg.dumps())
+        self.s3.write(f"messages/{msg_id}", msg.dumps())
         interior = msg.interior()
-        head = self.s3.read(f"/topics/{interior.topic}")
+        head = self.s3.read(f"topics/{interior.topic}")
         if not head:
-            self.s3.write(f"/topics/{interior.topic}", msg_id)
+            self.s3.write(f"topics/{interior.topic}", msg_id)
         if interior.parent == head:
-            self.s3.write(f"/topics/{interior.topic}", msg_id)
+            self.s3.write(f"topics/{interior.topic}", msg_id)
 
 
 @dataclass
@@ -422,9 +508,7 @@ class ChatInterface:  # pragma: no cover
         current_parent = self.client.get_head(self.session.topic)
         if self.session.update_parent(current_parent):
             head_msg = self.client.get_message(current_parent)
-            username = head_msg.profile.username
-            interior_text = head_msg.interior().text
-            self.history.append(f"{username}: {interior_text}")
+            self.session.append(head_msg)
 
     def redraw(self):
         self.messages_win.clear()
@@ -504,7 +588,7 @@ class SignedMessage:
     @classmethod
     def from_dict(cls, parts: dict[str, str]) -> 'SignedMessage':
         profile = Profile(parts['profile'])
-        body = parts['body'].encode()
+        body = base64.b64decode(parts['body'].encode())
         signature = Signature(parts['signature'])
         return cls(profile, body, signature)
 
@@ -528,10 +612,7 @@ class SignedMessage:
         - path: path to the JSON-formatted WMAP message
         """
         d = json.loads(data)
-        profile = Profile(d['profile'])
-        signature = Signature(d['signature'])
-        body = base64.b64decode(d['body'])
-        return cls(profile, body, signature)
+        return cls.from_dict(d)
 
     def into_dict(self) -> dict[str, str]:
         """
@@ -568,8 +649,12 @@ class SignedMessage:
             return self.profile.verify_signed_data(self.body, sigfile.name)
 
     def interior(self) -> InteriorMessage:
-        i = json.loads(self.body)
-        return InteriorMessage(i['topic'], i['parent'], i['data'])
+        i = json.loads(self.body.decode())
+        if 'text' in i:
+            text = i['text']
+        else:  # pragma: no cover
+            text = i['data']  # This is for old data
+        return InteriorMessage(i['topic'], i['parent'], text)
 
     def digest(self) -> str:
         digest = hashlib.sha256()
@@ -707,12 +792,16 @@ class S3Wrapper:  # pragma: no cover
             Body=value
         )
 
-    def read(self, key: str) -> str:
-        response = self.client.get_object(
-            Bucket=self.name,
-            Key=key
-        )
-        return response['Body'].read().decode()
+    def read(self, key: str) -> Optional[str]:
+        try:
+            response = self.client.get_object(
+                Bucket=self.name,
+                Key=key
+            )
+            return response['Body'].read().decode()
+        except Exception as e:
+            print(f"Read Error: {e}")
+            return None
 
 
 class ChatSession:
@@ -740,6 +829,11 @@ class ChatSession:
             self.parent = new_parent
             return True
         return False
+
+    def append(self, message: 'SignedMessage'):
+        username = message.profile.username
+        interior_text = message.interior().text
+        self.history.append(f"{username}: {interior_text}")
 
 
 @dataclass
