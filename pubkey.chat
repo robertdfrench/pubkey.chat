@@ -29,8 +29,8 @@ import json
 from typing import List, Optional
 import os
 from urllib import request
+import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -49,177 +49,49 @@ API_BASE_URL = "https://oe9xunloch.execute-api.us-east-1.amazonaws.com/prod"
 
 
 def main():  # pragma: no cover
-    """
-    Application entrypoint.
-
-    This is the application entrypoint (called at the end of this file in
-    the traditional python fashion). It assembles the command line interface
-    via argparse, and then passes control to one of the subcommand functions.
-
-    Subcommands:
-    - sign: Sign a file using your GitHub username and SSH key
-    - verify: Verify the authenticity of a signed file
-    - extract: Extract the content of a signed file, with an option to skip
-      validation
-
-    QA note: This function is not covered in unit testing as it is part of the
-    user interface.
-    """
-    # Setup the command line argument parser.
-    #
-    # This parser will read the comand line arguments provided by the user and
-    # turn them into a structure that we can query. This will allow us to
-    # determine what actions to perform later on.
-    #
-    # If you have not worked with argparse before, check out the tutorial:
-    # https://docs.python.org/3/howto/argparse.html#argparse-tutorial
     parser = argparse.ArgumentParser(
-            description='pubkey.chat: Signed communication via GitHub keys')
-    subparsers = parser.add_subparsers(dest='command', help='sub-command help')
+            description="A CLI for your curses application.")
 
-    # Setup subparser for the 'chat' command
-    parser_chat = subparsers.add_parser(
-            'chat', help='Chat with other GitHub users')
-    parser_chat.add_argument(
-            'username', type=str, help='GitHub username')
-    parser_chat.add_argument(
-            'key', type=str, help='SSH private key to use for chatting')
-    parser_chat.add_argument(
-            'topic', type=str, help='Chat Topic')
+    # Create subparsers for the 'chat' and 'daemon' commands
+    subparsers = parser.add_subparsers(
+            dest='command', required=True, help='Subcommand to run')
 
-    # Setup subparser for the 'extract' command
-    parser_extract = subparsers.add_parser(
-            'extract', help='Extract a signed file')
-    parser_extract.add_argument(
-            '--skip-validation', action='store_true',
-            help='Something is very wrong if you need to use this flag')
-    parser_extract.add_argument(
-            'file', type=str, help='Signed file to be extracted')
+    # Chat subcommand
+    chat_parser = subparsers.add_parser('chat', help='Run the chat mode')
+    chat_parser.add_argument(
+        '--config',
+        metavar='CONFIG',
+        type=str,
+        default=os.path.expanduser("~/.config/pubkey.chat/config.ini"),
+        help='Chat config (defaults to ~/.config/pubkey.chat/config.ini)'
+    )
+    chat_parser.add_argument(
+        'topic',
+        type=str,
+        help='Specify a topic for chat mode'
+    )
 
-    # Setup subparser for the 'service' command
-    parser_service = subparsers.add_parser(
-            'service', help='validate incoming messages')
-    parser_service.add_argument(
-            'config', type=str, help='Path to config file')
+    # Daemon subcommand
+    daemon_parser = subparsers.add_parser('daemon', help='Run the daemon mode')
+    daemon_parser.add_argument(
+        '--config',
+        metavar='CONFIG',
+        type=str,
+        required=True,
+        help='Run the daemon with the specified config file'
+    )
 
-    # Setup subparser for the 'sign' command
-    parser_sign = subparsers.add_parser(
-            'sign', help='Sign a file')
-    parser_sign.add_argument(
-            'username', type=str, help='GitHub username')
-    parser_sign.add_argument(
-            'key', type=str, help='SSH private key to use for signing')
-    parser_sign.add_argument(
-            'file', type=str, help='File to be signed')
-
-    # Setup subparser for the 'verify' command
-    parser_verify = subparsers.add_parser(
-            'verify', help='Verify a signed file')
-    parser_verify.add_argument(
-            'file', type=str, help='Signed file to be verified')
-
-    # Setup subparser for the 'head' command
-    parser_head = subparsers.add_parser(
-            'head', help='Get HEAD for a topic')
-    parser_head.add_argument(
-            'topic', type=str, help='topic to check')
-
-    # Setup subparser for the 'read' command
-    parser_read = subparsers.add_parser(
-            'read', help='Read the interior of a SignedMessage')
-    parser_read.add_argument(
-            '--skip-validation', action='store_true',
-            help='Something is very wrong if you need to use this flag')
-    parser_read.add_argument(
-            'message_id', type=str, help='message to read')
-
-    # Setup subparser for the 'get' command
-    parser_get = subparsers.add_parser(
-            'get', help='GET the latest message for a topic')
-    parser_get.add_argument(
-            'topic', type=str, help='topic to update')
-
-    # Setup subparser for the 'post' command
-    parser_post = subparsers.add_parser(
-            'post', help='Post some Text')
-    parser_post.add_argument(
-            'topic', type=str, help='topic to update')
-    parser_post.add_argument(
-            'username', type=str, help='GitHub username')
-    parser_post.add_argument(
-            'key', type=str, help='SSH private key to use for posting')
-    parser_post.add_argument(
-            'text', type=str, help='text to be posted')
-
+    # Parse the arguments
     args = parser.parse_args()
 
-    # Call the appropriate function based on the subcommand. Each subcommand is
-    # handled by its own function, and each expects different arguments.
+    # Execute the corresponding function based on the subcommand
     if args.command == 'chat':
-        chat_cmd(args.username, args.key, args.topic)
-    elif args.command == 'extract':
-        extract_cmd(args.file, args.skip_validation)
-    elif args.command == 'service':
-        service_cmd(args.config)
-    elif args.command == 'sign':
-        sign_cmd(args.username, args.key, args.file)
-    elif args.command == 'verify':
-        verify_cmd(args.file)
-    elif args.command == 'head':
-        head_cmd(args.topic)
-    elif args.command == 'read':
-        read_cmd(args.message_id, args.skip_validation)
-    elif args.command == 'get':
-        get_cmd(args.topic)
-    elif args.command == 'post':
-        post_cmd(args.topic, args.username, args.key, args.text)
-    else:
-        parser.print_help()
+        chat_main(args.config, args.topic)
+    elif args.command == 'daemon':
+        daemon_main(args.config)
 
 
-def post_cmd(topic: str, user: str, key: str, text: str):  # pragma: no cover
-    client = ChatAPIClient(API_BASE_URL, RestClient())
-    parent = client.get_head(topic)
-    interior = InteriorMessage(topic, parent, text)
-    with tempfile.NamedTemporaryFile() as f:
-        f.write(interior.dumps().encode())
-        f.flush()
-        sign_cmd(user, key, f.name)
-        signed_message = SignedMessage.load(f.name + ".wmap")
-    client = ChatAPIClient(API_BASE_URL, RestClient())
-    client.post_message(signed_message)
-
-
-def get_cmd(topic: str):  # pragma: no cover
-    client = ChatAPIClient(API_BASE_URL, RestClient())
-    message_id = client.get_head(topic)
-    read_cmd(message_id, False)
-
-
-def read_cmd(message_id: str, skip_validation: bool):  # pragma: no cover
-    client = ChatAPIClient(API_BASE_URL, RestClient())
-    message = client.get_message(message_id)
-    if skip_validation:
-        print(message.interior().text)
-    else:
-        if message.is_valid():
-            print(message.interior().text)
-        else:
-            print("Message is not valid")
-
-
-def head_cmd(topic: str):  # pragma: no cover
-    """
-    Get HEAD for a topic
-
-    Parameters:
-    - topic: the topic for which to get HEAD
-    """
-    client = ChatAPIClient(API_BASE_URL, RestClient())
-    print(client.get_head(topic))
-
-
-def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
+def chat_main(chat_config: str, topic: str):  # pragma: no cover
     """
     Open a chat window for 'topic'
 
@@ -228,8 +100,25 @@ def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
     - key: Path to your SSH private key
     - topic: The room you'd like to join
     """
-    def chat_main(stdscr):
-        user = ChatSession(username, key, topic)
+    if not os.path.exists(chat_config):
+        username = input("GitHub username: ")
+        key_path = input("SSH Private key: ")
+        config = configparser.ConfigParser()
+        config['Credentials'] = {
+            'username': username,
+            'key_path': os.path.expanduser(key_path)
+        }
+        os.makedirs(os.path.dirname(chat_config), exist_ok=True)
+        with open(chat_config, 'w') as f:
+            config.write(f)
+
+    config = configparser.ConfigParser()
+    config.read(chat_config)
+    username = config.get('Credentials', 'username')
+    key_path = config.get('Credentials', 'key_path')
+
+    def chat_loop(stdscr):
+        user = ChatSession(username, key_path, topic)
         interface = ChatInterface(stdscr, user)
 
         def update_messages():
@@ -246,28 +135,10 @@ def chat_cmd(username: str, key: str, topic: str):  # pragma: no cover
             interface.check_input()
             time.sleep(0.016)
 
-    curses.wrapper(chat_main)
+    curses.wrapper(chat_loop)
 
 
-def extract_cmd(file: str, skip_validation: bool = False):  # pragma: no cover
-    """
-    Verify, decode, and print the body of a WMAP-formatted file.
-
-    Parameters:
-    - file: the path to a WMAP-formatted file
-    - skip_validation: allow wmap to extract the body from an invalid file.
-
-    QA note: This function is not covered in unit testing as it is part of the
-    user interface.
-    """
-    if not skip_validation:  # Read this as 'if validate == True'
-        verify_cmd(file)
-    # If the message has a good signature, extract and print the body
-    message = SignedMessage.load(file)
-    print(str(message.body, 'utf-8'))
-
-
-def service_cmd(config_path: str):  # pragma: no cover
+def daemon_main(config_path: str):  # pragma: no cover
     """
     Launch the chat service
 
@@ -296,56 +167,6 @@ def service_cmd(config_path: str):  # pragma: no cover
                 bucket.write_message(message)
         except Exception as e:
             print(f"Error: {e}")
-
-
-def sign_cmd(username: str, key: str, file: str):  # pragma: no cover
-    """
-    Sign a file using the specified GitHub username and SSH key.
-
-    This function creates a WMAP-formatted, signed version of the input file.
-
-    Parameters:
-    - username: The GitHub username of the file's author
-    - key: Path to the SSH private key of the author
-    - file: Path to the file being signed
-
-    Output:
-    - Creates a new file named '{file}.wmap' containing the signed message.
-
-    Note: The public key corresponding to the private key must be installed on
-    the author's GitHub account.
-    """
-    profile = Profile(username)             # Load *your* github Profile
-    private_key = PrivateKey(profile, key)  # Load *your* SSH Private Key
-    private_key.sign(file)                  # Sign `file` with your SSH key
-    message = SignedMessage.from_raw_parts(
-            profile, file)                  # Load everything into one object
-    message.dump(file + ".wmap")            # Write WMAP-formatted msg to disk
-    os.remove(file + ".sig")                # Remove temporary sig file
-
-
-def verify_cmd(file: str):  # pragma: no cover
-    """
-    Verify the signature of a WMAP-formatted file.
-
-    Parameters:
-    - file: the path to a WMAP-formatted file
-
-    If the file cannot be verified, this function will cause wmap to exit
-    nonzero.
-
-    QA note: This function is not covered in unit testing as it is part of the
-    user interface.
-    """
-    sigfile = file + ".sig"
-    message = SignedMessage.load(file)     # Load message from disk
-    message.signature.dump(sigfile)  # Extract signature temporarily
-    valid = message.profile.verify_signed_data(
-            message.body, sigfile)   # Check signature against profile & body
-    os.remove(sigfile)               # Remove temporary signature
-    if not valid:
-        print("This document is not valid", file=sys.stderr)
-        sys.exit(1)
 
 
 class SigningAlgorithm(Enum):
@@ -458,19 +279,28 @@ class ChatAPIClient:
     api_base_url: str
     rest_client: 'RestClient'
 
-    def get_message(self, message_id: str) -> 'SignedMessage':
+    def get_message(self, message_id: str) -> Optional['SignedMessage']:
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
-        return SignedMessage.loads(msg_text)
+        if msg_text:
+            return SignedMessage.loads(msg_text)
+        else:
+            return None
 
     def get_head(self, topic: str) -> str:
         url = f"{self.api_base_url}/topics/{topic}"
-        return self.rest_client.get(url).rstrip()
+        response = self.rest_client.get(url)
+        if not response:
+            return ""
+        if re.fullmatch(r'[0-9a-fA-F]{64}', response):
+            # response is 64 hex chars
+            return response
+        else:
+            return ""
 
     def post_message(self, message: 'SignedMessage') -> str:
         url = f"{self.api_base_url}/messages"
         payload = message.into_dict()
-        message.dump("chat.wmap")
         return self.rest_client.post_json(url, payload)
 
 
@@ -496,12 +326,10 @@ class ChatInterface:  # pragma: no cover
 
     def post_message(self, text: str):
         interior = self.session.new_interior_message(text)
-        with tempfile.NamedTemporaryFile() as f:
-            f.write(interior.dumps().encode())
-            f.flush()
-            sign_cmd(self.session.username, self.session.key_path, f.name)
-            msg = SignedMessage.load(f.name + ".wmap")
-            self.client.post_message(msg)
+        profile = Profile(self.session.username)
+        pk = PrivateKey(profile, self.session.key_path)
+        signed_message = pk.sign_data(interior.dumps().encode())
+        self.client.post_message(signed_message)
 
     def update_messages(self):
         # This can lose messages
@@ -748,7 +576,17 @@ class PrivateKey:
             '-f', self.path,
             '-n', NAMESPACE,
             file
-        ], check=True)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def sign_data(self, data: bytes) -> SignedMessage:  # pragma: no cover
+        with tempfile.NamedTemporaryFile() as f:
+            sigfile = f.name + ".sig"
+            f.write(data)
+            f.flush()
+            self.sign(f.name)
+            message = SignedMessage.from_raw_parts(self.profile, f.name)
+            os.remove(sigfile)
+            return message
 
 
 @dataclass
@@ -767,9 +605,9 @@ class Queue():
 
 @dataclass
 class RestClient:  # pragma: no cover
-    def get(self, url: str) -> str:
+    def get(self, url: str) -> Optional[str]:
         with request.urlopen(url) as response:
-            return response.read().decode()
+            return response.read().decode().rstrip()
 
     def post_json(self, url: str, payload: dict) -> str:
         data = json.dumps(payload).encode()
@@ -800,7 +638,7 @@ class S3Wrapper:  # pragma: no cover
             )
             return response['Body'].read().decode()
         except Exception as e:
-            print(f"Read Error: {e}")
+            type(e)
             return None
 
 

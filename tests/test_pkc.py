@@ -64,10 +64,24 @@ def test_get_head():
     """
     Get the HEAD of a topic from the chat service
     """
-    rest_client = FakeRestClient(['aaa'])
+    rest_client = FakeRestClient(['cf971016ea65ef5ae050d86ae26249a985e0e0fcf8cf063a55e23c24a9944762'])
     client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
     head = client.get_head('default')
-    assert head == 'aaa'
+    assert head == 'cf971016ea65ef5ae050d86ae26249a985e0e0fcf8cf063a55e23c24a9944762'
+
+
+def test_bad_head():
+    rest_client = FakeRestClient(['corrupted response'])
+    client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
+    head = client.get_head('default')
+    assert head == ''
+
+
+def test_no_head():
+    rest_client = FakeRestClient([None])
+    client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
+    head = client.get_head('default')
+    assert head == ''
 
 
 def test_get_message():
@@ -86,6 +100,14 @@ def test_get_message():
     client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
     msg = client.get_message('aaa')
     assert msg.profile.username == 'a'
+
+
+def test_no_message():
+    rest_client = FakeRestClient([None])
+    client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
+    msg = client.get_message('aaa')
+    assert msg is None
+
 
 
 def test_post_message():
