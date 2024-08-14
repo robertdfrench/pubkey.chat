@@ -7,16 +7,17 @@
 """
 The Web-based Message Authentication Protocol
 
-WMAP allows secure exchange of signed messages between users using their GitHub
-SSH keys. This tool allows you to sign, verify, and extract messages.
+WMAP allows secure exchange of signed messages between users using
+their GitHub SSH keys. This tool allows you to sign, verify, and
+extract messages.
 
 Key features:
 - Sign messages using SSH keys linked to GitHub accounts
 - Verify the authenticity and integrity of signed messages
 - Extract the content of signed messages
 
-This module implements the core functionality of WMAP, including command-line
-interface, cryptographic operations, and file handling.
+This module implements the core functionality of WMAP, including
+command-line interface, cryptographic operations, and file handling.
 """
 import argparse
 import base64
@@ -36,34 +37,44 @@ import threading
 import time
 
 
-# This is the SSH signing namespace that we use for wmap messages. This is to
-# distinguish WMAP signatures from other SSH signin functions, as encouraged by
-# the ssh-keygen(1) man page.
+# This is the SSH signing namespace that we use for wmap messages.
+# This is to distinguish WMAP signatures from other SSH signin
+# functions, as encouraged by the ssh-keygen(1) man page.
 NAMESPACE = "wmap@wmap.dev"
 
 
-# This is the hardcoded base URL for the pubkey.chat service. This will need to
-# be configured, in the future, to default to `pubkey.chat` but also be
-# overridable for the sake of testing.
-API_BASE_URL = "https://oe9xunloch.execute-api.us-east-1.amazonaws.com/prod"
+# This is the hardcoded base URL for the pubkey.chat service. This
+# will need to be configured, in the future, to default to
+# `pubkey.chat` but also be overridable for the sake of testing.
+API_BASE_URL = \
+        "https://oe9xunloch.execute-api.us-east-1.amazonaws.com/prod"
+
+
+# Where we expect to find the config file if it has not otherwise been
+# specified.
+DEFAULT_CONFIG_PATH = "~/.config/pubkey.chat/config.ini"
 
 
 def main():  # pragma: no cover
     parser = argparse.ArgumentParser(
-            description="A CLI for your curses application.")
+        description="A CLI for your curses application.")
 
     # Create subparsers for the 'chat' and 'daemon' commands
     subparsers = parser.add_subparsers(
-            dest='command', required=True, help='Subcommand to run')
+        dest='command',
+        required=True,
+        help='Subcommand to run')
 
     # Chat subcommand
-    chat_parser = subparsers.add_parser('chat', help='Run the chat mode')
+    chat_parser = subparsers.add_parser(
+        'chat',
+        help='Run the chat mode')
     chat_parser.add_argument(
         '--config',
         metavar='CONFIG',
         type=str,
-        default=os.path.expanduser("~/.config/pubkey.chat/config.ini"),
-        help='Chat config (defaults to ~/.config/pubkey.chat/config.ini)'
+        default=os.path.expanduser(DEFAULT_CONFIG_PATH),
+        help=f"Chat config (defaults to f{DEFAULT_CONFIG_PATH})"
     )
     chat_parser.add_argument(
         'topic',
@@ -72,7 +83,9 @@ def main():  # pragma: no cover
     )
 
     # Daemon subcommand
-    daemon_parser = subparsers.add_parser('daemon', help='Run the daemon mode')
+    daemon_parser = subparsers.add_parser(
+        'daemon',
+        help='Run the daemon mode')
     daemon_parser.add_argument(
         '--config',
         metavar='CONFIG',
@@ -145,9 +158,10 @@ def daemon_main(config_path: str):  # pragma: no cover
     Parameters:
     - config_path: path to the chat service's config file
 
-    The config file should spell out the AWS Region ('region'), name of an S3
-    bucket into which messages will be written ('bucket_name'), and the name of
-    an SQS queue from which messages will be pulled ('queue_name').
+    The config file should spell out the AWS Region ('region'), name
+    of an S3 bucket into which messages will be written
+    ('bucket_name'), and the name of an SQS queue from which messages
+    will be pulled ('queue_name').
     """
     config = configparser.ConfigParser()
     config.read(config_path)
@@ -173,9 +187,9 @@ class SigningAlgorithm(Enum):
     """
     Allowable algorithms for SSH signing keys.
 
-    Not all SSH key algorithms support signing. RSA and ED25519 do, so when
-    parsing an Allowed Signers record or an Authorized Key record, we want to
-    restrict ourselves to those two algorithms.
+    Not all SSH key algorithms support signing. RSA and ED25519 do, so
+    when parsing an Allowed Signers record or an Authorized Key
+    record, we want to restrict ourselves to those two algorithms.
     """
     RSA = auto()
     ED25519 = auto()
@@ -183,15 +197,16 @@ class SigningAlgorithm(Enum):
     @classmethod
     def parse(cls, string: str) -> 'SigningAlgorithm':
         """
-        Attempt to parse a string into one of these SigningAlgorithm enum
-        instances.
+        Attempt to parse a string into one of these SigningAlgorithm
+        enum instances.
 
         Parameters:
         - string: a string which may or may not be a valid SSH signing
           algorithm.
 
         Raises:
-        - Exception: if the string does not match an allowed algorithm.
+        - Exception: if the string does not match an allowed
+          algorithm.
         """
         if string == "ssh-rsa":
             return cls.RSA
@@ -213,8 +228,8 @@ class AuthorizedKey:
     Representation of an Authorized Key entry, as seen in an
     ~/.ssh/authorized_keys file.
 
-    See the AUTHORIZED_KEYS_FILE_FORMAT section of the sshd(8) man page for
-    more information about what these files look like.
+    See the AUTHORIZED_KEYS_FILE_FORMAT section of the sshd(8) man
+    page for more information about what these files look like.
     """
     algorithm: SigningAlgorithm
     material: str
@@ -223,14 +238,14 @@ class AuthorizedKey:
     @classmethod
     def parse(cls, string: str) -> 'AuthorizedKey':
         """
-        Parse an authorized keys entry into its constituent parts. Such entries
-        take the following form:
+        Parse an authorized keys entry into its constituent parts.
+        Such entries take the following form:
 
             ssh-rsa ABC...123 username@example.com (other comments)
 
         Parameters:
-        - string: a string which ought to be a normal-looking authorized keys
-          entry.
+        - string: a string which ought to be a normal-looking
+          authorized keys entry.
         """
         parts = string.split()
         algorithm = SigningAlgorithm.parse(parts[0])
@@ -238,22 +253,27 @@ class AuthorizedKey:
 
     def into_allowed_signer(self, profile: 'Profile') -> str:
         """
-        Convert this authorized keys entry into an ALLOWED SIGNERS entry. Such
-        records take the following form:
+        Convert this authorized keys entry into an ALLOWED SIGNERS
+        entry. Such records take the following form:
 
             username namespacs="wmap@wmap.dev" ssh-rsa ABC...123
 
-        More information on ALLOWED SIGNERS can be found in the `ssh-keygen(1)`
-        manual page.
+        More information on ALLOWED SIGNERS can be found in the
+        `ssh-keygen(1)` manual page.
 
         Parameters:
-        - profile: the profile of the GitHub user for whom we'd like to build
-          the ALLOWED SIGNERS record.
+        - profile: the profile of the GitHub user for whom we'd like
+          to build the ALLOWED SIGNERS record.
         """
         principal = profile.username
         algorithm = str(self.algorithm)
         material = self.material
-        return f"{principal} namespaces=\"{NAMESPACE}\" {algorithm} {material}"
+        return " ".join([
+            principal,
+            f'namespaces="{NAMESPACE}"',
+            algorithm,
+            material
+        ])
 
 
 @dataclass
@@ -279,7 +299,8 @@ class ChatAPIClient:
     api_base_url: str
     rest_client: 'RestClient'
 
-    def get_message(self, message_id: str) -> Optional['SignedMessage']:
+    def get_message(
+            self, message_id: str) -> Optional['SignedMessage']:
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
         if msg_text:
@@ -315,8 +336,10 @@ class ChatInterface:  # pragma: no cover
         stdscr.nodelay(1)  # Don't block when waiting for input
         stdscr.timeout(1000)  # Refresh every second
 
-        self.messages_win = curses.newwin(curses.LINES - 3, curses.COLS, 0, 0)
-        self.input_win = curses.newwin(3, curses.COLS, curses.LINES - 3, 0)
+        self.messages_win = curses.newwin(
+                curses.LINES - 3, curses.COLS, 0, 0)
+        self.input_win = curses.newwin(
+                3, curses.COLS, curses.LINES - 3, 0)
 
         self.draw_input_window()
 
@@ -387,26 +410,29 @@ class InteriorMessage:
 @dataclass
 class SignedMessage:
     """
-    A signed copy of the original content, which can be shared with and
-    validated by anyone.
+    A signed copy of the original content, which can be shared with
+    and validated by anyone.
     """
     profile: 'Profile'
     body: bytes
     signature: 'Signature'
 
     @classmethod
-    def from_raw_parts(cls, profile: 'Profile', path: str) -> 'SignedMessage':
+    def from_raw_parts(
+            cls, profile: 'Profile', path: str) -> 'SignedMessage':
         """
         Create a SignedMessage object from a file and its signature.
 
         Parameters:
-        - profile: the GitHub profile of the user who signed this document
+        - profile: the GitHub profile of the user who signed this
+          document
         - path: path to the document which was signed
 
         Assumptions:
-        The document referenced by `path` should have been signed (using wmap)
-        prior to calling this method. In particular, an OpenSSH-formatted
-        signature file should exist on disk at `path`.sig.
+        The document referenced by `path` should have been signed
+        (using wmap) prior to calling this method. In particular, an
+        OpenSSH-formatted signature file should exist on disk at
+        `path`.sig.
         """
         with open(path, 'rb') as f:
             body = f.read()
@@ -444,8 +470,8 @@ class SignedMessage:
 
     def into_dict(self) -> dict[str, str]:
         """
-        Convert this object into a python dictionary, and convert each of its
-        fields into their string representation.
+        Convert this object into a python dictionary, and convert each
+        of its fields into their string representation.
         """
         return {
             'profile': str(self.profile),
@@ -458,8 +484,8 @@ class SignedMessage:
         Store this message on disk.
 
         Parameters:
-        - path: path on disk where this JSON-formatted WMAP message should be
-          written.
+        - path: path on disk where this JSON-formatted WMAP message
+          should be written.
         """
         with open(path, 'w') as f:
             json.dump(self.into_dict(), f)
@@ -474,7 +500,8 @@ class SignedMessage:
         with tempfile.NamedTemporaryFile() as sigfile:
             self.signature.dump(sigfile.name)
             sigfile.flush()
-            return self.profile.verify_signed_data(self.body, sigfile.name)
+            return self.profile.verify_signed_data(
+                    self.body, sigfile.name)
 
     def interior(self) -> InteriorMessage:
         i = json.loads(self.body.decode())
@@ -507,8 +534,8 @@ class Profile:
 
     def authorized_keys(self) -> List[AuthorizedKey]:
         """
-        Grab the user's Authorized Keys from GitHub, transforming each of them
-        into an AuthorizedKey object.
+        Grab the user's Authorized Keys from GitHub, transforming each
+        of them into an AuthorizedKey object.
         """
         with request.urlopen(self.authorized_keys_url()) as response:
             lines = response.read().decode().splitlines()
@@ -518,32 +545,35 @@ class Profile:
         """
         Transform each Authorized Key into an ALLOWED SIGNERS record
 
-        More information on ALLOWED SIGNERS can be found in the `ssh-keygen(1)`
-        manual page.
+        More information on ALLOWED SIGNERS can be found in the
+        `ssh-keygen(1)` manual page.
         """
-        return [k.into_allowed_signer(self) for k in self.authorized_keys()]
+        keys = self.authorized_keys()
+        return [k.into_allowed_signer(self) for k in keys]
 
-    def verify_signed_data(self, data: bytes, signature_path: str) -> bool:
+    def verify_signed_data(
+            self, data: bytes, signature_path: str) -> bool:
         """
-        Check whether we have a valid signature for `data` from the current
-        GitHub user.
+        Check whether we have a valid signature for `data` from the
+        current GitHub user.
 
         Parameters:
         - data: the bytes which were signed
-        - signature_path: a path to the signature file created by ssh-keygen
+        - signature_path: a path to the signature file created by
+          ssh-keygen
 
         Returns true if the signature matches, false if not.
         """
         with tempfile.NamedTemporaryFile() as allowed_signers_file:
             signers = "\n".join(self.allowed_signers()) + "\n"
-            # We write and flush together because we need to know for sure that
-            # all these bytes have been written to disk before we try to point
-            # ssh-keygen at this file.
+            # We write and flush together because we need to know for
+            # sure that all these bytes have been written to disk
+            # before we try to point ssh-keygen at this file.
             allowed_signers_file.write(bytes(signers, 'utf-8'))
             allowed_signers_file.flush()
             results = subprocess.run([
                 'ssh-keygen', '-Y', 'verify',
-                '-f', allowed_signers_file.name,  # This file was just flushed.
+                '-f', allowed_signers_file.name,
                 '-I', self.username,
                 '-n', NAMESPACE,
                 '-s', signature_path
@@ -557,7 +587,8 @@ class Profile:
 @dataclass
 class PrivateKey:
     """
-    An SSH Private Key for the GitHub user identified by the `profile` object.
+    An SSH Private Key for the GitHub user identified by the `profile`
+    object.
     """
     profile: Profile
     path: str
@@ -571,20 +602,26 @@ class PrivateKey:
 
         Upon success, the signature will be stored in `file`.sig.
         """
-        subprocess.run([
-            'ssh-keygen', '-Y', 'sign',
-            '-f', self.path,
-            '-n', NAMESPACE,
-            file
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [
+                'ssh-keygen', '-Y', 'sign',
+                '-f', self.path,
+                '-n', NAMESPACE,
+                file
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
 
-    def sign_data(self, data: bytes) -> SignedMessage:  # pragma: no cover
+    def sign_data(
+            self, data: bytes) -> SignedMessage:  # pragma: no cover
         with tempfile.NamedTemporaryFile() as f:
             sigfile = f.name + ".sig"
             f.write(data)
             f.flush()
             self.sign(f.name)
-            message = SignedMessage.from_raw_parts(self.profile, f.name)
+            message = SignedMessage.from_raw_parts(
+                    self.profile, f.name)
             os.remove(sigfile)
             return message
 
@@ -612,7 +649,8 @@ class RestClient:  # pragma: no cover
     def post_json(self, url: str, payload: dict) -> str:
         data = json.dumps(payload).encode()
         headers = {'Content-Type': 'application/json'}
-        r = request.Request(url, data=data, headers=headers, method='POST')
+        r = request.Request(
+                url, data=data, headers=headers, method='POST')
         with request.urlopen(r) as response:
             return response.read().decode()
 
@@ -689,15 +727,15 @@ class Signature:
         Parameters:
         - path: path to an SSH signature file
 
-        The SSH signature is stored on disk in a format determined by OpenSSH.
-        This format is line-oriented, which is tricky to work with in a JSON
-        document. As such, we choose to work with a base64-encoded
-        representation of this signature instead.
+        The SSH signature is stored on disk in a format determined by
+        OpenSSH.  This format is line-oriented, which is tricky to
+        work with in a JSON document. As such, we choose to work with
+        a base64-encoded representation of this signature instead.
         """
         with open(path) as f:
             raw_text = f.read()
             # Encode the signature bytes file as a Base64 string
-            content = str(base64.b64encode(bytes(raw_text, 'utf-8')), 'utf-8')
+            content = base64.b64encode(raw_text.encode()).decode()
             return cls(content)
 
     def dump(self, path: str):
@@ -707,12 +745,12 @@ class Signature:
         Parameters:
         - path: the path where the SSH signature should be written
 
-        Since the SSH signature in a WMAP file (and in this object) is in
-        base64, we need to decode it before writing it to disk so that it
-        matches the format which ssh-keygen expects.
+        Since the SSH signature in a WMAP file (and in this object) is
+        in base64, we need to decode it before writing it to disk so
+        that it matches the format which ssh-keygen expects.
         """
         with open(path, 'w') as f:
-            decoded = str(base64.b64decode(self.content), 'utf-8')
+            decoded = base64.b64decode(self.content).decode()
             f.write(decoded)
 
     def __str__(self) -> str:
@@ -750,8 +788,9 @@ class SQSWrapper:  # pragma: no cover
 if __name__ == "__main__":  # pragma: no cover
     # This is a common Python trick.
     #
-    # The `main` function is only called if this file is being run as a
-    # *program* (in which case the global __name__ variable will be set to
-    # "__main__"). If this file is being used as a library (which is the case
-    # when we run the unit tests), `main` will not be called.
+    # The `main` function is only called if this file is being run as
+    # a *program* (in which case the global __name__ variable will be
+    # set to "__main__"). If this file is being used as a library
+    # (which is the case when we run the unit tests), `main` will not
+    # be called.
     main()
