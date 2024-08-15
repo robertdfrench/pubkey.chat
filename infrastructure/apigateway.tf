@@ -235,6 +235,10 @@ resource "aws_api_gateway_stage" "prod" {
     destination_arn = aws_cloudwatch_log_group.chat.arn
     format          = "$context.requestId $context.identity.sourceIp $context.identity.caller $context.identity.user $context.requestTime $context.httpMethod $context.resourcePath $context.status $context.protocol $context.responseLength"
   }
+
+  variables = {
+    "CloudFrontDomainName" = aws_cloudfront_distribution.api_distribution.domain_name
+  }
 }
 
 resource "aws_iam_role" "api_gateway_sqs_role" {
