@@ -2,6 +2,7 @@ include common.mk
 
 deploy: test #: Deploy to production
 	$(MAKE) -C infrastructure apply
+	$(MAKE) -C website deploy
 
 test: lint typecheck check #: Run all tests
 	$(MAKE) -C infrastructure test

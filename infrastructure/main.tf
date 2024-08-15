@@ -89,6 +89,7 @@ resource "aws_iam_instance_profile" "chat_service_instance_profile" {
 # Create a security group for the EC2 instance
 resource "aws_security_group" "chat_service_sg" {
   name_prefix = "chat-service-sg"
+  vpc_id      = aws_vpc.main.id  # You'll need to create a VPC resource
 
   ingress {
     from_port   = 22
@@ -105,29 +106,6 @@ resource "aws_security_group" "chat_service_sg" {
   }
 }
 
-# Create an EC2 instance using the Packer AMI
-resource "aws_instance" "chat_service_instance" {
-  ami           = data.aws_ami.packer_ami.id
-  instance_type = "t2.micro"
-  security_groups = [aws_security_group.chat_service_sg.name]
-  iam_instance_profile = aws_iam_instance_profile.chat_service_instance_profile.name
-
-  tags = {
-    Name = "Chat Service Instance"
-  }
-
-  user_data = <<-EOF
-              #!/bin/bash
-              echo "[DEFAULT]" > /etc/chat.ini
-              echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
-              echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
-              echo "table_name=${aws_dynamodb_table.locking_table.name}" >> /etc/chat.ini
-              echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
-              systemctl enable chat.service
-              systemctl start chat.service
-              EOF
-}
-
 # Output the SQS queue URL and S3 bucket name
 output "sqs_queue_url" {
   value = aws_sqs_queue.chat_service_queue.id
@@ -135,8 +113,4 @@ output "sqs_queue_url" {
 
 output "s3_bucket_name" {
   value = aws_s3_bucket.chat_service_bucket.bucket
-}
-
-output "instance_id" {
-  value = aws_instance.chat_service_instance.id
 }
