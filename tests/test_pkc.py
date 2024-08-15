@@ -166,18 +166,33 @@ class MockS3Wrapper:
     def read(self, key: str) -> str | None:
         return self.contents.get(key, None)
 
+
+class MockLock:
+    def __init__(self):
+        self.table = dict()
+
+    def acquire(self, topic, ttl):
+        if topic in self.table:
+            return False
+        self.table[topic] = ttl
+        return True
+
+    def release(self, topic):
+        del self.table[topic]
+
 def test_bucket_write_message():
     interior = {"topic": "math", "text": "I love math", "parent": ""}
     body = base64.b64encode(json.dumps(interior).encode()).decode()
     msg_dict = {"profile": "a", "body": body, "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper(dict())
-    bucket = pkc.PublicChatBucket(s3)
+    bucket = pkc.PublicChatBucket(s3, pkc.TopicLock(MockLock()))
     bucket.write_message(message)
     print(s3.contents.keys())
     assert s3.contents['messages/2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24']
     assert s3.contents['topics/math'] == \
         "2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24"
+
 
 def test_bucket_update_topic():
     interior = {"topic": "math", "text": "I love math", "parent": "x"}
@@ -185,10 +200,23 @@ def test_bucket_update_topic():
     msg_dict = {"profile": "a", "body": body, "signature": "b"}
     message = pkc.SignedMessage.from_dict(msg_dict)
     s3 = MockS3Wrapper({"topics/math": "x"})
-    bucket = pkc.PublicChatBucket(s3)
+    bucket = pkc.PublicChatBucket(s3, pkc.TopicLock(MockLock()))
     bucket.write_message(message)
     assert s3.contents['topics/math'] == \
         "1b209d90f7ebcfab4945827cb4f670da6247eee9a4777bc3bafc46805197576b"
+
+
+def test_bucket_race_condition():
+    interior = {"topic": "math", "text": "I love math", "parent": "x"}
+    body = base64.b64encode(json.dumps(interior).encode()).decode()
+    msg_dict = {"profile": "a", "body": body, "signature": "b"}
+    message = pkc.SignedMessage.from_dict(msg_dict)
+    s3 = MockS3Wrapper({"topics/math": "x"})
+    lock = MockLock()
+    lock.table['math'] = 1
+    bucket = pkc.PublicChatBucket(s3, pkc.TopicLock(lock))
+    with pytest.raises(Exception):
+        bucket.write_message(message)
 
 
 def test_message_is_valid():

@@ -22,6 +22,7 @@ command-line interface, cryptographic operations, and file handling.
 import argparse
 import base64
 import configparser
+from contextlib import contextmanager
 import curses
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -168,7 +169,12 @@ def daemon_main(config_path: str):  # pragma: no cover
         config['DEFAULT']['region'],
         config['DEFAULT']['bucket_name']
     )
-    bucket = PublicChatBucket(s3)
+    lock_table = DynamoDBLock(
+        config['DEFAULT']['region'],
+        config['DEFAULT']['table_name']
+    )
+    lock = TopicLock(lock_table)
+    bucket = PublicChatBucket(s3, lock)
     sqs = SQSWrapper(
         config['DEFAULT']['region'],
         config['DEFAULT']['queue_name']
@@ -278,16 +284,48 @@ class AuthorizedKey:
 @dataclass
 class PublicChatBucket:
     s3: 'S3Wrapper'
+    lock: 'TopicLock'
 
     def write_message(self, msg: 'SignedMessage'):
         msg_id = msg.digest()
         self.s3.write(f"messages/{msg_id}", msg.dumps())
         interior = msg.interior()
-        head = self.s3.read(f"topics/{interior.topic}")
-        if not head:
-            self.s3.write(f"topics/{interior.topic}", msg_id)
-        if interior.parent == head:
-            self.s3.write(f"topics/{interior.topic}", msg_id)
+        with self.lock(interior.topic):
+            head = self.s3.read(f"topics/{interior.topic}")
+            if not head:
+                self.s3.write(f"topics/{interior.topic}", msg_id)
+            if interior.parent == head:
+                self.s3.write(f"topics/{interior.topic}", msg_id)
+
+
+class DynamoDBLock:  # pragma: no cover
+    def __init__(self, region: str, name: str):
+        import boto3  # type: ignore
+        self.dynamo = boto3.resource('dynamodb', region_name=region)
+        self.name = name
+
+    def acquire(self, lock_id: str, ttl: int):
+        now = int(time.time())
+        cond_expr = 'attribute_not_exists(LockID) OR ExpiresAt < :now'
+        expr_attr = {':now': now}
+        item = {
+            'LockID': lock_id,
+            'ExpiresAt': now + ttl
+        }
+        try:
+            self.dynamo.put_item(
+                Table=self.name,
+                Item=item,
+                ConditionExpression=cond_expr,
+                ExpressionAttributeValues=expr_attr
+            )
+            return True
+        except Exception as e:
+            type(e)
+            return False
+
+    def release(self, lock_id):
+        self.dynamo.delete_item(Key={'LockID': lock_id})
 
 
 @dataclass
@@ -677,6 +715,20 @@ class S3Wrapper:  # pragma: no cover
         except Exception as e:
             type(e)
             return None
+
+
+@dataclass
+class TopicLock:
+    lock_table: DynamoDBLock
+
+    @contextmanager
+    def __call__(self, topic: str):
+        if not self.lock_table.acquire(topic, 60):
+            raise Exception("Failed to acquire lock")
+        try:
+            yield
+        finally:
+            self.lock_table.release(topic)
 
 
 class ChatSession:

@@ -61,6 +61,15 @@ resource "aws_iam_role_policy" "chat_service_policy" {
       {
         Effect = "Allow",
         Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem"
+        ],
+        Resource = "${aws_dynamodb_table.locking_table.arn}"
+      },
+      {
+        Effect = "Allow",
+        Action = [
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
@@ -112,6 +121,7 @@ resource "aws_instance" "chat_service_instance" {
               echo "[DEFAULT]" > /etc/chat.ini
               echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
               echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
+              echo "table_name=${aws_dynamodb_table.locking_table.name}" >> /etc/chat.ini
               echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
               systemctl enable chat.service
               systemctl start chat.service
