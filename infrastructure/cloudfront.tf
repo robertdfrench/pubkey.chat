@@ -5,6 +5,8 @@ resource "aws_cloudfront_distribution" "api_distribution" {
   comment             = "CDN for API Gateway"
   default_root_object = ""
 
+  aliases = ["pubkey.chat"]
+
   origin {
     # https://oe9xunloch.execute-api.us-east-1.amazonaws.com/
     domain_name = replace(
@@ -76,27 +78,11 @@ resource "aws_cloudfront_distribution" "api_distribution" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn = aws_acm_certificate.cert.arn
+    ssl_support_method = "sni-only"
   }
 
 }
-
-# Instead of adding CloudFront domain to API Gateway stage, 
-# create a custom domain for API Gateway (optional)
-# resource "aws_api_gateway_domain_name" "chat_api" {
-#   domain_name              = "pubkey.chat"  # Replace with your domain
-#   regional_certificate_arn = "arn:aws:acm:region:account:certificate/cert-id"  # Replace with your SSL cert ARN
-# 
-#   endpoint_configuration {
-#     types = ["REGIONAL"]
-#   }
-# }
-# 
-# resource "aws_api_gateway_base_path_mapping" "chat_api" {
-#   api_id      = aws_api_gateway_rest_api.chat.id
-#   stage_name  = aws_api_gateway_stage.prod.stage_name
-#   domain_name = aws_api_gateway_domain_name.chat_api.domain_name
-# }
 
 # Output both CloudFront URL and API Gateway custom domain
 output "cloudfront_url" {

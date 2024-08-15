@@ -46,7 +46,7 @@ NAMESPACE = "wmap@wmap.dev"
 # This is the hardcoded base URL for the pubkey.chat service. This
 # will need to be configured, in the future, to default to
 # `pubkey.chat` but also be overridable for the sake of testing.
-API_BASE_URL = "https://dyxo5io5pqi3u.cloudfront.net"
+API_BASE_URL = "https://pubkey.chat"
 
 
 # Where we expect to find the config file if it has not otherwise been
