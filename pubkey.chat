@@ -302,7 +302,7 @@ class DynamoDBLock:  # pragma: no cover
     def __init__(self, region: str, name: str):
         import boto3  # type: ignore
         self.dynamo = boto3.resource('dynamodb', region_name=region)
-        self.name = name
+        self.table = self.dynamo.Table(name)
 
     def acquire(self, lock_id: str, ttl: int):
         now = int(time.time())
@@ -313,19 +313,18 @@ class DynamoDBLock:  # pragma: no cover
             'ExpiresAt': now + ttl
         }
         try:
-            self.dynamo.put_item(
-                Table=self.name,
+            self.table.put_item(
                 Item=item,
                 ConditionExpression=cond_expr,
                 ExpressionAttributeValues=expr_attr
             )
             return True
         except Exception as e:
-            type(e)
+            print(e)
             return False
 
     def release(self, lock_id):
-        self.dynamo.delete_item(Key={'LockID': lock_id})
+        self.table.delete_item(Key={'LockID': lock_id})
 
 
 @dataclass
@@ -713,7 +712,7 @@ class S3Wrapper:  # pragma: no cover
             )
             return response['Body'].read().decode()
         except Exception as e:
-            type(e)
+            print(e)
             return None
 
 
@@ -723,8 +722,8 @@ class TopicLock:
 
     @contextmanager
     def __call__(self, topic: str):
-        if not self.lock_table.acquire(topic, 60):
-            raise Exception("Failed to acquire lock")
+        if not self.lock_table.acquire(topic, 2):
+            raise Exception(f"Failed to acquire lock for {topic}")
         try:
             yield
         finally:
