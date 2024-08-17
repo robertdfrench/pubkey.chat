@@ -3,6 +3,12 @@ resource "aws_api_gateway_rest_api" "chat" {
   description = "API for Chat Service"
 }
 
+resource "aws_api_gateway_resource" "asset_name" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  parent_id   = aws_api_gateway_rest_api.chat.root_resource_id
+  path_part   = "{name}"
+}
+
 resource "aws_api_gateway_resource" "messages" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   parent_id   = aws_api_gateway_rest_api.chat.root_resource_id
@@ -56,6 +62,24 @@ resource "aws_api_gateway_method" "get_topic" {
   }
 }
 
+resource "aws_api_gateway_method" "get_asset" {
+  rest_api_id   = aws_api_gateway_rest_api.chat.id
+  resource_id   = aws_api_gateway_resource.asset_name.id
+  http_method   = "GET"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.name" = true
+  }
+}
+
+resource "aws_api_gateway_method" "get_root" {
+  rest_api_id   = aws_api_gateway_rest_api.chat.id
+  resource_id   = aws_api_gateway_rest_api.chat.root_resource_id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
 resource "aws_api_gateway_integration" "create_message" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   resource_id = aws_api_gateway_resource.messages.id
@@ -106,6 +130,31 @@ resource "aws_api_gateway_integration" "get_topic" {
   }
 }
 
+resource "aws_api_gateway_integration" "get_asset" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.asset_name.id
+  http_method = aws_api_gateway_method.get_message.http_method
+  credentials = aws_iam_role.api_gateway_sqs_role.arn
+
+  integration_http_method = "GET"
+  type                    = "AWS"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/{name}"
+  request_parameters = {
+    "integration.request.path.name" = "method.request.path.name"
+  }
+}
+
+resource "aws_api_gateway_integration" "get_root" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_rest_api.chat.root_resource_id
+  http_method = aws_api_gateway_method.get_message.http_method
+  credentials = aws_iam_role.api_gateway_sqs_role.arn
+
+  integration_http_method = "GET"
+  type                    = "AWS"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/index.html"
+}
+
 resource "aws_api_gateway_method_response" "get_message_200" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   resource_id = aws_api_gateway_resource.messages_name.id
@@ -121,6 +170,28 @@ resource "aws_api_gateway_method_response" "get_topic_200" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   resource_id = aws_api_gateway_resource.topics_name.id
   http_method = aws_api_gateway_method.get_topic.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Content-Type" = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "get_asset_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.asset_name.id
+  http_method = aws_api_gateway_method.get_asset.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Content-Type" = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "get_root_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_rest_api.chat.root_resource_id
+  http_method = aws_api_gateway_method.get_asset.http_method
   status_code = "200"
 
   response_parameters = {
@@ -155,6 +226,36 @@ resource "aws_api_gateway_integration_response" "get_topic_200" {
 
   depends_on = [
     aws_api_gateway_integration.get_topic
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "get_asset_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_resource.asset_name.id
+  http_method = aws_api_gateway_method.get_asset.http_method
+  status_code = aws_api_gateway_method_response.get_asset_200.status_code
+
+  response_parameters = {
+    "method.response.header.Content-Type" = "integration.response.header.Content-Type"
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.get_asset
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "get_root_200" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  resource_id = aws_api_gateway_rest_api.chat.root_resource_id
+  http_method = aws_api_gateway_method.get_root.http_method
+  status_code = aws_api_gateway_method_response.get_root_200.status_code
+
+  response_parameters = {
+    "method.response.header.Content-Type" = "integration.response.header.Content-Type"
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.get_root
   ]
 }
 
@@ -207,6 +308,14 @@ resource "aws_api_gateway_deployment" "chat" {
       aws_api_gateway_integration.get_topic.id,
       aws_api_gateway_method_response.get_topic_200.id,
       aws_api_gateway_integration_response.get_topic_200.id,
+      aws_api_gateway_method.get_asset.id,
+      aws_api_gateway_integration.get_asset.id,
+      aws_api_gateway_method_response.get_asset_200.id,
+      aws_api_gateway_integration_response.get_asset_200.id,
+      aws_api_gateway_method.get_root.id,
+      aws_api_gateway_integration.get_root.id,
+      aws_api_gateway_method_response.get_root_200.id,
+      aws_api_gateway_integration_response.get_root_200.id,
     ]))
   }
 
