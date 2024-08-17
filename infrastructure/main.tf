@@ -14,6 +14,7 @@ data "aws_ami" "packer_ami" {
 # Create an S3 bucket
 resource "aws_s3_bucket" "chat_service_bucket" {
   bucket = "objects-dot-pubkey-dot-chat"
+  force_destroy = true
 }
 
 # Create an SQS queue
@@ -89,7 +90,7 @@ resource "aws_iam_instance_profile" "chat_service_instance_profile" {
 # Create a security group for the EC2 instance
 resource "aws_security_group" "chat_service_sg" {
   name_prefix = "chat-service-sg"
-  vpc_id      = aws_vpc.main.id  # You'll need to create a VPC resource
+  vpc_id      = data.aws_vpc.default.id  # You'll need to create a VPC resource
 
   ingress {
     from_port   = 22

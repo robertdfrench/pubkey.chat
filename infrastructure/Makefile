@@ -5,11 +5,10 @@ test: #: Run a fake test
 
 apply: build/tf_init #: Create AWS Resources
 	make -C image ami
-	terraform validate
+	make -C dns apply
 	terraform apply -auto-approve
 
 plan: build/tf_init #: Review a plan before applying it
-	terraform validate
 	terraform plan
 
 destroy: build/tf_init #: Destroy terraform infrastructure

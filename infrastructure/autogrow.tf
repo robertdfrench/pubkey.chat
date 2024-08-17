@@ -9,15 +9,15 @@ resource "aws_launch_template" "chat_service" {
   }
 
   user_data = base64encode(<<-EOF
-              #!/bin/bash
-              echo "[DEFAULT]" > /etc/chat.ini
-              echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
-              echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
-              echo "table_name=${aws_dynamodb_table.locking_table.name}" >> /etc/chat.ini
-              echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
-              systemctl enable chat.service
-              systemctl start chat.service
-              EOF
+      #!/bin/bash
+      echo "[DEFAULT]" > /etc/chat.ini
+      echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
+      echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
+      echo "table_name=${aws_dynamodb_table.locking_table.name}" >> /etc/chat.ini
+      echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
+      systemctl enable chat.service
+      systemctl start chat.service
+      EOF
   )
 
   tags = {
@@ -27,7 +27,7 @@ resource "aws_launch_template" "chat_service" {
 
 resource "aws_autoscaling_group" "chat_service" {
   name                = "chat-service-asg"
-  vpc_zone_identifier = [aws_subnet.main.id]  # You'll need to create a subnet resource
+  vpc_zone_identifier = data.aws_subnets.default.ids
   min_size            = 1
   max_size            = 10
   desired_capacity    = 1
@@ -78,20 +78,14 @@ resource "aws_autoscaling_policy" "scale_down" {
   autoscaling_group_name = aws_autoscaling_group.chat_service.name
 }
 
-resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
-  
-  tags = {
-    Name = "Chat Service VPC"
-  }
+data "aws_vpc" "default" {
+  default = true
 }
 
-resource "aws_subnet" "main" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.0.1.0/24"
-  
-  tags = {
-    Name = "Chat Service Subnet"
+data "aws_subnets" "default" {
+  filter {
+    name = "vpc-id"
+    values = [data.aws_vpc.default.id]
   }
 }
 
