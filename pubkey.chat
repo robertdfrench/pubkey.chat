@@ -28,21 +28,15 @@ import dataclasses
 import enum
 import hashlib
 import json
-import typing
 import os
-import urllib
-import urllib.request
 import re
 import subprocess
 import tempfile
 import threading
 import time
-
-
-# This is the SSH signing namespace that we use for wmap messages.
-# This is to distinguish WMAP signatures from other SSH signin
-# functions, as encouraged by the ssh-keygen(1) man page.
-NAMESPACE = "wmap@wmap.dev"
+import typing
+import urllib
+import urllib.request
 
 
 # This is the hardcoded base URL for the pubkey.chat service. This
@@ -56,17 +50,33 @@ API_BASE_URL = "https://pubkey.chat"
 DEFAULT_CONFIG_PATH = "~/.config/pubkey.chat/config.ini"
 
 
+# This is the SSH signing namespace that we use for wmap messages.
+# This is to distinguish WMAP signatures from other SSH signin
+# functions, as encouraged by the ssh-keygen(1) man page.
+NAMESPACE = "wmap@wmap.dev"
+
+
 def main():  # pragma: no cover
+    """
+    Application Entrypoint.
+
+    This function is responsible for parsing the command line
+    arguments and handing execution over to one of the subcommands
+    ('chat' or 'daemon').
+
+    Available command line arguments are describe below, but you can
+    see them more easily by running `pubkey.chat -h`.
+    """
     parser = argparse.ArgumentParser(
             description="Pubkey.Chat: You're already logged in!")
 
-    # Create subparsers for the 'chat' and 'daemon' commands
+    # Create subparsers for each of the 'chat' and 'daemon' commands
     subparsers = parser.add_subparsers(
         dest='command',
         required=True,
         help='Subcommand to run')
 
-    # Chat subcommand
+    # Config Chat subcommand. This is what end users will invoke.
     chat_parser = subparsers.add_parser(
         'chat',
         help='Connect and start chatting!')
@@ -83,7 +93,8 @@ def main():  # pragma: no cover
         help='Specify a topic for chat mode'
     )
 
-    # Daemon subcommand
+    # Daemon subcommand. This is invoked by servers processing
+    # incoming chat messages.
     daemon_parser = subparsers.add_parser(
         'daemon',
         help='Launch the backend service on your own infrastructure')
@@ -95,7 +106,8 @@ def main():  # pragma: no cover
         help='Run the daemon with the specified config file'
     )
 
-    # Parse the arguments
+    # Parse the arguments provided by the user, according to the rules
+    # laid out above.
     args = parser.parse_args()
 
     # Execute the corresponding function based on the subcommand
@@ -110,43 +122,67 @@ def chat_main(chat_config: str, topic: str):  # pragma: no cover
     Open a chat window for 'topic'
 
     Parameters:
-    - username: Your GitHub username
-    - key: Path to your SSH private key
+    - chat_config: path to a config file containing your GitHub
+      username and the path to your SSH private key.
     - topic: The room you'd like to join
     """
+    # If the config file doesn't already exist, prompt the user for
+    # the information we need to create it.
     if not os.path.exists(chat_config):
         username = input("GitHub username: ")
         key_path = input("SSH Private key: ")
         ChatConfig(username, key_path).dump(chat_config)
 
+    # Load the chat config from disk and extract the 'profile' and
+    # 'private_key' objects which you'll need in order to sign your
+    # chat messages.
     config = ChatConfig.load(chat_config)
     profile = Profile(config.username)
     private_key = PrivateKey(profile, config.key_path)
 
+    # The curses library requires that we provide a function to
+    # control our primary ui logic. And instance of the screen
+    # (`stdscr`) is created by the curses library and passed as input
+    # to this method, which will use it to steer the user experience.
     def chat_loop(stdscr):
         ptr = ChatPointer(topic)
         client = ChatAPIClient(API_BASE_URL, RestClient())
-
-        ui = ChatUI(stdscr, 16)
-        ui.userlist.append(profile.username)
+        ui = ChatUI(stdscr)
         subscription = TopicSubscription(topic, ui, ptr, client)
 
+        # Run the TopicSubcscription logic in another thread. This
+        # allows for new messages to appear on screen without causing
+        # the ui to jitter.
         comms_thread = threading.Thread(target=subscription)
         comms_thread.daemon = True
         comms_thread.start()
 
+        # Loop until the user quits the application. This loop waits
+        # for user input, signing and posting that data once it is
+        # available (when the user hits "Enter").
         while True:
-            inp = ui.wait_input()
-            if inp == "/quit":
+            # Wait for input, and quit the application if the input is
+            # the literal string "/quit".
+            text = ui.wait_input()
+            if text == "/quit":
                 break
-            imsg = ptr.new_interior_message(inp)
+
+            # We have to assemble this in reverse order -- construct
+            # an instance of InteriorMessage first, and then construct
+            # a WMAP message by signing the InteriorMessage.
+            imsg = ptr.new_interior_message(text)
             msg = private_key.sign_data(imsg.dumps().encode())
+
+            # Try posting the message, and append a notice to the chat
+            # buffer (visible only to the current user) if the message
+            # could not be posted.
             try:
                 client.post_message(msg)
-                subscription.reset_sleep_duration()
             except urllib.error.HTTPError as e:
                 ui.chatbuffer_add(f"[pubkey.chat]: {e}")
 
+    # Start a curses window using the `chat_loop` method defined
+    # above.
     curses.wrapper(chat_loop)
 
 
@@ -162,6 +198,10 @@ def daemon_main(config_path: str):  # pragma: no cover
     ('bucket_name'), and the name of an SQS queue from which messages
     will be pulled ('queue_name').
     """
+    # Load our AWS config options from `config_path`, and then create
+    # clients for each AWS service we need: s3 (for storing messages),
+    # sqs (for awaiting new messages), and DynamoDB (for synchronizing
+    # access to topics among all the daemon hosts).
     config = DaemonConfig.load(config_path)
     s3 = S3Wrapper(config.region, config.bucket_name)
     lock_table = DynamoDBLock(config.region, config.table_name)
@@ -169,6 +209,9 @@ def daemon_main(config_path: str):  # pragma: no cover
     bucket = PublicChatBucket(s3, lock)
     sqs = SQSWrapper(config.region, config.queue_name)
     queue = Queue(sqs)
+
+    # For every message in the queue, attempt to validate it, and
+    # write it to the message bucket if it's valid.
     for message in queue.messages():
         try:
             if message.is_valid():
@@ -177,17 +220,110 @@ def daemon_main(config_path: str):  # pragma: no cover
             print(f"Error: {e}")
 
 
-INITIAL_SLEEP_DURATION = 0.1
-MAX_SLEEP_DURATION = 30.0
+@dataclasses.dataclass
+class AuthorizedKey:
+    """
+    Representation of an Authorized Key entry, as seen in an
+    ~/.ssh/authorized_keys file.
+
+    See the AUTHORIZED_KEYS_FILE_FORMAT section of the sshd(8) man
+    page for more information about what these files look like.
+    """
+    algorithm: 'SigningAlgorithm'
+    material: str
+    comment: str
+
+    @classmethod
+    def parse(cls, string: str) -> 'AuthorizedKey':
+        """
+        Parse an authorized keys entry into its constituent parts.
+        Such entries take the following form:
+
+            ssh-rsa ABC...123 username@example.com (other comments)
+
+        Parameters:
+        - string: a string which ought to be a normal-looking
+          authorized keys entry.
+        """
+        parts = string.split()
+        algorithm = SigningAlgorithm.parse(parts[0])
+        return cls(algorithm, parts[1], " ".join(parts[2:]))
+
+    def into_allowed_signer(self, profile: 'Profile') -> str:
+        """
+        Convert this authorized keys entry into an ALLOWED SIGNERS
+        entry. Such records take the following form:
+
+            username namespacs="wmap@wmap.dev" ssh-rsa ABC...123
+
+        More information on ALLOWED SIGNERS can be found in the
+        `ssh-keygen(1)` manual page.
+
+        Parameters:
+        - profile: the profile of the GitHub user for whom we'd like
+          to build the ALLOWED SIGNERS record.
+        """
+        principal = profile.username
+        algorithm = str(self.algorithm)
+        material = self.material
+        return " ".join([
+            principal,
+            f'namespaces="{NAMESPACE}"',
+            algorithm,
+            material
+        ])
+
+
+@dataclasses.dataclass
+class ChatAPIClient:
+    """
+    Raw operations with the Chat Service backend
+    """
+    api_base_url: str
+    rest_client: 'RestClient'
+
+    def get_message(
+            self,
+            message_id: str) -> typing.Optional['SignedMessage']:
+        url = f"{self.api_base_url}/messages/{message_id}"
+        msg_text = self.rest_client.get(url)
+        if msg_text:
+            return SignedMessage.loads(msg_text)
+        else:
+            return None
+
+    def get_head(self, topic: str) -> str:
+        url = f"{self.api_base_url}/topics/{topic}"
+        response = self.rest_client.get(url)
+        if not response:
+            return ""
+        if re.fullmatch(r'[0-9a-fA-F]{64}', response):
+            # response is 64 hex chars
+            return response
+        else:
+            return ""
+
+    def post_message(self, message: 'SignedMessage') -> str:
+        url = f"{self.api_base_url}/messages"
+        payload = message.into_dict()
+        return self.rest_client.post_json(url, payload)
 
 
 @dataclasses.dataclass
 class ChatConfig:
+    """
+    This config file represents config options for the chat client.
+    That means stuff like the username and the path to the user's
+    preferred SSH private key (for signing messages).
+    """
     username: str
     key_path: str
 
     @classmethod
     def load(cls, path: str) -> 'ChatConfig':
+        """
+        Load a config object from disk
+        """
         config = configparser.ConfigParser()
         config.read(path)
         return cls(
@@ -196,65 +332,44 @@ class ChatConfig:
         )
 
     def dump(self, path: str):
+        """
+        Write a config object to disk
+        """
         config = configparser.ConfigParser()
         config['Credentials'] = {
             'username': self.username,
             'key_path': self.key_path
         }
         dirname = os.path.dirname(path)
+
+        # If `path` is in the current directory, `dirname` will be the
+        # empty string. `os.makedirs` will not know what to do with
+        # the empty string, so in this case we just replace it with
+        # ".", which refers correctly to the current directory.
         if dirname == '':  # pragma: no cover
             dirname = "."
+
         os.makedirs(dirname, exist_ok=True)
         with open(path, 'w') as f:
             config.write(f)
 
 
-@dataclasses.dataclass
-class DaemonConfig:
-    region: str
-    bucket_name: str
-    table_name: str
-    queue_name: str
-
-    @classmethod
-    def load(cls, path: str) -> 'DaemonConfig':
-        config = configparser.ConfigParser()
-        config.read(path)
-        return cls(
-            config['DEFAULT']['region'],
-            config['DEFAULT']['bucket_name'],
-            config['DEFAULT']['table_name'],
-            config['DEFAULT']['queue_name']
-        )
-
-
-@dataclasses.dataclass
-class TopicSubscription:  # pragma: no cover
+class ChatPointer:
     topic: str
-    ui: 'ChatUI'
-    ptr: 'ChatPointer'
-    client: 'ChatAPIClient'
-    sleep_duration: float = INITIAL_SLEEP_DURATION
+    parent: str
 
-    def __call__(self):
-        while True:
-            time.sleep(self.sleep_duration)
-            self.work()
+    def __init__(self, topic: str):
+        self.topic = topic
+        self.parent = ""
 
-    def reset_sleep_duration(self):
-        self.sleep_duration = INITIAL_SLEEP_DURATION
+    def new_interior_message(self, text: str) -> 'InteriorMessage':
+        return InteriorMessage(self.topic, self.parent, text)
 
-    def work(self):
-        head = self.client.get_head(self.topic)
-        if self.ptr.update_parent(head):
-            message = self.client.get_message(self.ptr.parent)
-            username = message.profile.username
-            text = message.interior().text
-            self.ui.chatbuffer_add(f"{username}: {text}")
-            self.reset_sleep_duration()
-        else:
-            if self.sleep_duration < MAX_SLEEP_DURATION:
-                self.sleep_duration *= 2
+    def update_parent(self, new_parent) -> bool:
+        if new_parent != self.parent:
+            self.parent = new_parent
+            return True
+        return False
 
 
 class ChatUI:  # pragma: no cover
@@ -286,7 +401,8 @@ class ChatUI:  # pragma: no cover
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
     """
-    def __init__(self, stdscr, userlist_width=16):
+    def __init__(self, stdscr):
+        userlist_width = 16
         stdscr.clear()
         curses.use_default_colors()
         for i in range(0, curses.COLORS):
@@ -428,131 +544,70 @@ class ChatUI:  # pragma: no cover
             self.redraw_chatline()
 
 
-class SigningAlgorithm(enum.Enum):
+@dataclasses.dataclass
+class DaemonConfig:
     """
-    Allowable algorithms for SSH signing keys.
-
-    Not all SSH key algorithms support signing. RSA and ED25519 do, so
-    when parsing an Allowed Signers record or an Authorized Key
-    record, we want to restrict ourselves to those two algorithms.
+    Config file for the Message Validation Daemon. Contains the names
+    of the AWS resources that we'll need to connect to.
     """
-    RSA = enum.auto()
-    ED25519 = enum.auto()
+    region: str
+    bucket_name: str
+    table_name: str
+    queue_name: str
 
     @classmethod
-    def parse(cls, string: str) -> 'SigningAlgorithm':
+    def load(cls, path: str) -> 'DaemonConfig':
         """
-        Attempt to parse a string into one of these SigningAlgorithm
-        enum instances.
-
-        Parameters:
-        - string: a string which may or may not be a valid SSH signing
-          algorithm.
-
-        Raises:
-        - Exception: if the string does not match an allowed
-          algorithm.
+        Load the daemon config from disk
         """
-        if string == "ssh-rsa":
-            return cls.RSA
-        elif string == "ssh-ed25519":
-            return cls.ED25519
-        else:
-            raise Exception("Unknown ssh key algorithm")
-
-    def __str__(self):
-        if self == SigningAlgorithm.RSA:
-            return "ssh-rsa"
-        if self == SigningAlgorithm.ED25519:
-            return "ssh-ed25519"
-
-
-@dataclasses.dataclass
-class AuthorizedKey:
-    """
-    Representation of an Authorized Key entry, as seen in an
-    ~/.ssh/authorized_keys file.
-
-    See the AUTHORIZED_KEYS_FILE_FORMAT section of the sshd(8) man
-    page for more information about what these files look like.
-    """
-    algorithm: SigningAlgorithm
-    material: str
-    comment: str
-
-    @classmethod
-    def parse(cls, string: str) -> 'AuthorizedKey':
-        """
-        Parse an authorized keys entry into its constituent parts.
-        Such entries take the following form:
-
-            ssh-rsa ABC...123 username@example.com (other comments)
-
-        Parameters:
-        - string: a string which ought to be a normal-looking
-          authorized keys entry.
-        """
-        parts = string.split()
-        algorithm = SigningAlgorithm.parse(parts[0])
-        return cls(algorithm, parts[1], " ".join(parts[2:]))
-
-    def into_allowed_signer(self, profile: 'Profile') -> str:
-        """
-        Convert this authorized keys entry into an ALLOWED SIGNERS
-        entry. Such records take the following form:
-
-            username namespacs="wmap@wmap.dev" ssh-rsa ABC...123
-
-        More information on ALLOWED SIGNERS can be found in the
-        `ssh-keygen(1)` manual page.
-
-        Parameters:
-        - profile: the profile of the GitHub user for whom we'd like
-          to build the ALLOWED SIGNERS record.
-        """
-        principal = profile.username
-        algorithm = str(self.algorithm)
-        material = self.material
-        return " ".join([
-            principal,
-            f'namespaces="{NAMESPACE}"',
-            algorithm,
-            material
-        ])
-
-
-@dataclasses.dataclass
-class PublicChatBucket:
-    s3: 'S3Wrapper'
-    lock: 'TopicLock'
-
-    def write_message(self, msg: 'SignedMessage'):
-        msg_id = msg.digest()
-        self.s3.write(f"messages/{msg_id}", msg.dumps())
-        interior = msg.interior()
-        with self.lock(interior.topic):
-            head = self.s3.read(f"topics/{interior.topic}")
-            if not head:
-                self.s3.write(f"topics/{interior.topic}", msg_id)
-            if interior.parent == head:
-                self.s3.write(f"topics/{interior.topic}", msg_id)
+        config = configparser.ConfigParser()
+        config.read(path)
+        return cls(
+            config['DEFAULT']['region'],
+            config['DEFAULT']['bucket_name'],
+            config['DEFAULT']['table_name'],
+            config['DEFAULT']['queue_name']
+        )
 
 
 class DynamoDBLock:  # pragma: no cover
+    """
+    An expirable lock mechanism that relies on DynamoDB's conditional
+    update capabilities.
+    """
     def __init__(self, region: str, name: str):
+        # We have to import boto3 here because we don't want to have
+        # to import it at the top of this file, since it is necessary
+        # for the chat client. Remember that one of the goals for the
+        # chat client is to run without any dependencies beyond the
+        # Python standard library.
         import boto3  # type: ignore
         self.dynamo = boto3.resource('dynamodb', region_name=region)
         self.table = self.dynamo.Table(name)
 
-    def acquire(self, lock_id: str, ttl: int):
-        now = int(time.time())
+    def acquire(self, lock_id: str, ttl: int) -> bool:
+        """
+        Attempt to acquire a lock named `lock_id` for at least `ttl`
+        seconds. If successful, no other worked will be able to get a
+        lock for `lock_id` for the next `ttl` seconds, or whenever we
+        release this lock (whichever comes first).
+        """
+        # This is the secret sauce. DynamoDB supports "condition
+        # expressions" for updates, meaning that the update will not
+        # proceed unless the following condition is met. In this case,
+        # either there must not be any row for our chose `lock_id`, if
+        # there is one, it must have already expired.
         cond_expr = 'attribute_not_exists(LockID) OR ExpiresAt < :now'
+        now = int(time.time())
         expr_attr = {':now': now}
         item = {
             'LockID': lock_id,
             'ExpiresAt': now + ttl
         }
         try:
+            # This update statement will only work if the condition
+            # expression is true. If it is false, that means someone
+            # else has the lock.
             self.table.put_item(
                 Item=item,
                 ConditionExpression=cond_expr,
@@ -564,42 +619,9 @@ class DynamoDBLock:  # pragma: no cover
             return False
 
     def release(self, lock_id):
+        # Release the lock by deleting the corresponding row from the
+        # table.
         self.table.delete_item(Key={'LockID': lock_id})
-
-
-@dataclasses.dataclass
-class ChatAPIClient:
-    """
-    Raw operations with the Chat Service backend
-    """
-    api_base_url: str
-    rest_client: 'RestClient'
-
-    def get_message(
-            self,
-            message_id: str) -> typing.Optional['SignedMessage']:
-        url = f"{self.api_base_url}/messages/{message_id}"
-        msg_text = self.rest_client.get(url)
-        if msg_text:
-            return SignedMessage.loads(msg_text)
-        else:
-            return None
-
-    def get_head(self, topic: str) -> str:
-        url = f"{self.api_base_url}/topics/{topic}"
-        response = self.rest_client.get(url)
-        if not response:
-            return ""
-        if re.fullmatch(r'[0-9a-fA-F]{64}', response):
-            # response is 64 hex chars
-            return response
-        else:
-            return ""
-
-    def post_message(self, message: 'SignedMessage') -> str:
-        url = f"{self.api_base_url}/messages"
-        payload = message.into_dict()
-        return self.rest_client.post_json(url, payload)
 
 
 @dataclasses.dataclass
@@ -617,6 +639,258 @@ class InteriorMessage:
 
     def dumps(self) -> str:
         return json.dumps(self.into_dict())
+
+
+@dataclasses.dataclass
+class PrivateKey:
+    """
+    An SSH Private Key for the GitHub user identified by the `profile`
+    object.
+    """
+    profile: 'Profile'
+    path: str
+
+    def sign(self, file: str):
+        """
+        Use this private key to sign the contents of `file`.
+
+        Parameters:
+        - file: the file (on disk) which should be signed
+
+        Upon success, the signature will be stored in `file`.sig.
+        """
+        subprocess.run(
+            [
+                'ssh-keygen', '-Y', 'sign',
+                '-f', self.path,
+                '-n', NAMESPACE,
+                file
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+
+    def sign_data(
+            self, data: bytes) -> 'SignedMessage':  # pragma: no cover
+        with tempfile.NamedTemporaryFile() as f:
+            sigfile = f.name + ".sig"
+            f.write(data)
+            f.flush()
+            self.sign(f.name)
+            message = SignedMessage.from_raw_parts(
+                    self.profile, f.name)
+            os.remove(sigfile)
+            return message
+
+
+@dataclasses.dataclass
+class Profile:
+    """
+    The GitHub profile associated with `username`
+    """
+    username: str
+
+    def url(self) -> str:
+        """URL for this user's github profile"""
+        return f"https://github.com/{self.username}"
+
+    def authorized_keys_url(self) -> str:
+        """URL for this user's ssh public keys"""
+        return self.url() + ".keys"
+
+    def authorized_keys(self) -> typing.List[AuthorizedKey]:
+        """
+        Grab the user's Authorized Keys from GitHub, transforming each
+        of them into an AuthorizedKey object.
+        """
+        with urllib.request.urlopen(self.authorized_keys_url()) as response:
+            lines = response.read().decode().splitlines()
+            return [AuthorizedKey.parse(line) for line in lines]
+
+    def allowed_signers(self) -> typing.List[str]:
+        """
+        Transform each Authorized Key into an ALLOWED SIGNERS record
+
+        More information on ALLOWED SIGNERS can be found in the
+        `ssh-keygen(1)` manual page.
+        """
+        keys = self.authorized_keys()
+        return [k.into_allowed_signer(self) for k in keys]
+
+    def verify_signed_data(
+            self, data: bytes, signature_path: str) -> bool:
+        """
+        Check whether we have a valid signature for `data` from the
+        current GitHub user.
+
+        Parameters:
+        - data: the bytes which were signed
+        - signature_path: a path to the signature file created by
+          ssh-keygen
+
+        Returns true if the signature matches, false if not.
+        """
+        with tempfile.NamedTemporaryFile() as allowed_signers_file:
+            signers = "\n".join(self.allowed_signers()) + "\n"
+            # We write and flush together because we need to know for
+            # sure that all these bytes have been written to disk
+            # before we try to point ssh-keygen at this file.
+            allowed_signers_file.write(bytes(signers, 'utf-8'))
+            allowed_signers_file.flush()
+            results = subprocess.run([
+                'ssh-keygen', '-Y', 'verify',
+                '-f', allowed_signers_file.name,
+                '-I', self.username,
+                '-n', NAMESPACE,
+                '-s', signature_path
+            ], input=data, capture_output=True)
+            return results.returncode == 0
+
+    def __str__(self) -> str:
+        return self.username
+
+
+@dataclasses.dataclass
+class PublicChatBucket:
+    """
+    This class manages storage for all of the chat data. It stores
+    signed messages, and manages synchronous updates to topic files.
+    """
+    s3: 'S3Wrapper'
+    lock: 'TopicLock'
+
+    def write_message(self, msg: 'SignedMessage'):
+        """
+        Write a new WMAP message to the bucket, updating message's
+        topic if the following conditions are met:
+
+        * No other worker has a lock for this topic
+        * The message refers to the current topic HEAD (that is, the
+          message is up-to-date)
+
+        If the message refers to an older topic HEAD, then we assume
+        that the user does not have all of the latest messages for
+        this topic, so we do not allow them to append to the topic.
+
+        Any code calling this function is expected to provide only
+        messges which are calid. This function will not attempt to
+        validate them.
+        """
+        msg_id = msg.digest()
+        self.s3.write(f"messages/{msg_id}", msg.dumps())
+        interior = msg.interior()
+        with self.lock(interior.topic):
+            # Now that we have acquired a lock for the topic, we can
+            # try to update it.
+            head = self.s3.read(f"topics/{interior.topic}")
+            if not head:
+                # No messages have been written to this topic yet, so
+                # it's okay to make our message the first
+                self.s3.write(f"topics/{interior.topic}", msg_id)
+            if interior.parent == head:
+                # Our message expects its parent to be the current
+                # topic head, which means it's okay to make our
+                # message the *new* topic head
+                self.s3.write(f"topics/{interior.topic}", msg_id)
+
+
+@dataclasses.dataclass
+class Queue():
+    sqs: 'SQSWrapper'
+
+    def messages(self):
+        while True:
+            candidates = self.sqs.receive(1)
+            if len(candidates) == 0:  # pragma: no cover
+                continue
+            message = candidates[0]
+            yield SignedMessage.from_dict(json.loads(message['Body']))
+            self.sqs.delete(message['ReceiptHandle'])
+
+
+@dataclasses.dataclass
+class RestClient:  # pragma: no cover
+    def get(self, url: str) -> typing.Optional[str]:
+        with urllib.request.urlopen(url) as response:
+            return response.read().decode().rstrip()
+
+    def post_json(self, url: str, payload: dict) -> str:
+        data = json.dumps(payload).encode()
+        headers = {'Content-Type': 'application/json'}
+        r = urllib.request.Request(
+                url, data=data, headers=headers, method='POST')
+        with urllib.request.urlopen(r) as response:
+            return response.read().decode()
+
+
+class S3Wrapper:  # pragma: no cover
+    def __init__(self, region, name):
+        import boto3  # type: ignore
+        self.client = boto3.client('s3', region_name=region)
+        self.name = name
+
+    def write(self, key: str, value: str):
+        self.client.put_object(
+            Bucket=self.name,
+            Key=key,
+            Body=value
+        )
+
+    def read(self, key: str) -> typing.Optional[str]:
+        try:
+            response = self.client.get_object(
+                Bucket=self.name,
+                Key=key
+            )
+            return response['Body'].read().decode()
+        except Exception as e:
+            print(e)
+            return None
+
+
+@dataclasses.dataclass
+class Signature:
+    """
+    The output of ssh-keygen -Y sign
+    """
+    content: str
+
+    @classmethod
+    def load(cls, path: str) -> 'Signature':
+        """
+        Load an SSH signature from a file
+
+        Parameters:
+        - path: path to an SSH signature file
+
+        The SSH signature is stored on disk in a format determined by
+        OpenSSH.  This format is line-oriented, which is tricky to
+        work with in a JSON document. As such, we choose to work with
+        a base64-encoded representation of this signature instead.
+        """
+        with open(path) as f:
+            raw_text = f.read()
+            # Encode the signature bytes file as a Base64 string
+            content = base64.b64encode(raw_text.encode()).decode()
+            return cls(content)
+
+    def dump(self, path: str):
+        """
+        Write an SSH signature to disk,
+
+        Parameters:
+        - path: the path where the SSH signature should be written
+
+        Since the SSH signature in a WMAP file (and in this object) is
+        in base64, we need to decode it before writing it to disk so
+        that it matches the format which ssh-keygen expects.
+        """
+        with open(path, 'w') as f:
+            decoded = base64.b64decode(self.content).decode()
+            f.write(decoded)
+
+    def __str__(self) -> str:
+        return self.content
 
 
 @dataclasses.dataclass
@@ -729,244 +1003,43 @@ class SignedMessage:
         return digest.hexdigest()
 
 
-@dataclasses.dataclass
-class Profile:
+class SigningAlgorithm(enum.Enum):
     """
-    The GitHub profile associated with `username`
+    Allowable algorithms for SSH signing keys.
+
+    Not all SSH key algorithms support signing. RSA and ED25519 do, so
+    when parsing an Allowed Signers record or an Authorized Key
+    record, we want to restrict ourselves to those two algorithms.
     """
-    username: str
-
-    def url(self) -> str:
-        """URL for this user's github profile"""
-        return f"https://github.com/{self.username}"
-
-    def authorized_keys_url(self) -> str:
-        """URL for this user's ssh public keys"""
-        return self.url() + ".keys"
-
-    def authorized_keys(self) -> typing.List[AuthorizedKey]:
-        """
-        Grab the user's Authorized Keys from GitHub, transforming each
-        of them into an AuthorizedKey object.
-        """
-        with urllib.request.urlopen(self.authorized_keys_url()) as response:
-            lines = response.read().decode().splitlines()
-            return [AuthorizedKey.parse(line) for line in lines]
-
-    def allowed_signers(self) -> typing.List[str]:
-        """
-        Transform each Authorized Key into an ALLOWED SIGNERS record
-
-        More information on ALLOWED SIGNERS can be found in the
-        `ssh-keygen(1)` manual page.
-        """
-        keys = self.authorized_keys()
-        return [k.into_allowed_signer(self) for k in keys]
-
-    def verify_signed_data(
-            self, data: bytes, signature_path: str) -> bool:
-        """
-        Check whether we have a valid signature for `data` from the
-        current GitHub user.
-
-        Parameters:
-        - data: the bytes which were signed
-        - signature_path: a path to the signature file created by
-          ssh-keygen
-
-        Returns true if the signature matches, false if not.
-        """
-        with tempfile.NamedTemporaryFile() as allowed_signers_file:
-            signers = "\n".join(self.allowed_signers()) + "\n"
-            # We write and flush together because we need to know for
-            # sure that all these bytes have been written to disk
-            # before we try to point ssh-keygen at this file.
-            allowed_signers_file.write(bytes(signers, 'utf-8'))
-            allowed_signers_file.flush()
-            results = subprocess.run([
-                'ssh-keygen', '-Y', 'verify',
-                '-f', allowed_signers_file.name,
-                '-I', self.username,
-                '-n', NAMESPACE,
-                '-s', signature_path
-            ], input=data, capture_output=True)
-            return results.returncode == 0
-
-    def __str__(self) -> str:
-        return self.username
-
-
-@dataclasses.dataclass
-class PrivateKey:
-    """
-    An SSH Private Key for the GitHub user identified by the `profile`
-    object.
-    """
-    profile: Profile
-    path: str
-
-    def sign(self, file: str):
-        """
-        Use this private key to sign the contents of `file`.
-
-        Parameters:
-        - file: the file (on disk) which should be signed
-
-        Upon success, the signature will be stored in `file`.sig.
-        """
-        subprocess.run(
-            [
-                'ssh-keygen', '-Y', 'sign',
-                '-f', self.path,
-                '-n', NAMESPACE,
-                file
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
-
-    def sign_data(
-            self, data: bytes) -> SignedMessage:  # pragma: no cover
-        with tempfile.NamedTemporaryFile() as f:
-            sigfile = f.name + ".sig"
-            f.write(data)
-            f.flush()
-            self.sign(f.name)
-            message = SignedMessage.from_raw_parts(
-                    self.profile, f.name)
-            os.remove(sigfile)
-            return message
-
-
-@dataclasses.dataclass
-class Queue():
-    sqs: 'SQSWrapper'
-
-    def messages(self):
-        while True:
-            candidates = self.sqs.receive(1)
-            if len(candidates) == 0:  # pragma: no cover
-                continue
-            message = candidates[0]
-            yield SignedMessage.from_dict(json.loads(message['Body']))
-            self.sqs.delete(message['ReceiptHandle'])
-
-
-@dataclasses.dataclass
-class RestClient:  # pragma: no cover
-    def get(self, url: str) -> typing.Optional[str]:
-        with urllib.request.urlopen(url) as response:
-            return response.read().decode().rstrip()
-
-    def post_json(self, url: str, payload: dict) -> str:
-        data = json.dumps(payload).encode()
-        headers = {'Content-Type': 'application/json'}
-        r = urllib.request.Request(
-                url, data=data, headers=headers, method='POST')
-        with urllib.request.urlopen(r) as response:
-            return response.read().decode()
-
-
-class S3Wrapper:  # pragma: no cover
-    def __init__(self, region, name):
-        import boto3  # type: ignore
-        self.client = boto3.client('s3', region_name=region)
-        self.name = name
-
-    def write(self, key: str, value: str):
-        self.client.put_object(
-            Bucket=self.name,
-            Key=key,
-            Body=value
-        )
-
-    def read(self, key: str) -> typing.Optional[str]:
-        try:
-            response = self.client.get_object(
-                Bucket=self.name,
-                Key=key
-            )
-            return response['Body'].read().decode()
-        except Exception as e:
-            print(e)
-            return None
-
-
-@dataclasses.dataclass
-class TopicLock:
-    lock_table: DynamoDBLock
-
-    @contextlib.contextmanager
-    def __call__(self, topic: str):
-        if not self.lock_table.acquire(topic, 2):
-            raise Exception(f"Failed to acquire lock for {topic}")
-        try:
-            yield
-        finally:
-            self.lock_table.release(topic)
-
-
-class ChatPointer:
-    topic: str
-    parent: str
-
-    def __init__(self, topic: str):
-        self.topic = topic
-        self.parent = ""
-
-    def new_interior_message(self, text: str) -> InteriorMessage:
-        return InteriorMessage(self.topic, self.parent, text)
-
-    def update_parent(self, new_parent) -> bool:
-        if new_parent != self.parent:
-            self.parent = new_parent
-            return True
-        return False
-
-
-@dataclasses.dataclass
-class Signature:
-    """
-    The output of ssh-keygen -Y sign
-    """
-    content: str
+    RSA = enum.auto()
+    ED25519 = enum.auto()
 
     @classmethod
-    def load(cls, path: str) -> 'Signature':
+    def parse(cls, string: str) -> 'SigningAlgorithm':
         """
-        Load an SSH signature from a file
+        Attempt to parse a string into one of these SigningAlgorithm
+        enum instances.
 
         Parameters:
-        - path: path to an SSH signature file
+        - string: a string which may or may not be a valid SSH signing
+          algorithm.
 
-        The SSH signature is stored on disk in a format determined by
-        OpenSSH.  This format is line-oriented, which is tricky to
-        work with in a JSON document. As such, we choose to work with
-        a base64-encoded representation of this signature instead.
+        Raises:
+        - Exception: if the string does not match an allowed
+          algorithm.
         """
-        with open(path) as f:
-            raw_text = f.read()
-            # Encode the signature bytes file as a Base64 string
-            content = base64.b64encode(raw_text.encode()).decode()
-            return cls(content)
+        if string == "ssh-rsa":
+            return cls.RSA
+        elif string == "ssh-ed25519":
+            return cls.ED25519
+        else:
+            raise Exception("Unknown ssh key algorithm")
 
-    def dump(self, path: str):
-        """
-        Write an SSH signature to disk,
-
-        Parameters:
-        - path: the path where the SSH signature should be written
-
-        Since the SSH signature in a WMAP file (and in this object) is
-        in base64, we need to decode it before writing it to disk so
-        that it matches the format which ssh-keygen expects.
-        """
-        with open(path, 'w') as f:
-            decoded = base64.b64decode(self.content).decode()
-            f.write(decoded)
-
-    def __str__(self) -> str:
-        return self.content
+    def __str__(self):
+        if self == SigningAlgorithm.RSA:
+            return "ssh-rsa"
+        if self == SigningAlgorithm.ED25519:
+            return "ssh-ed25519"
 
 
 class SQSWrapper:  # pragma: no cover
@@ -995,6 +1068,81 @@ class SQSWrapper:  # pragma: no cover
 
     def __repr__(self) -> str:
         return f"SQSWrapper({self.region}, {self.name})"
+
+
+@dataclasses.dataclass
+class TopicLock:
+    lock_table: DynamoDBLock
+
+    @contextlib.contextmanager
+    def __call__(self, topic: str):
+        if not self.lock_table.acquire(topic, 2):
+            raise Exception(f"Failed to acquire lock for {topic}")
+        try:
+            yield
+        finally:
+            self.lock_table.release(topic)
+
+
+@dataclasses.dataclass
+class TopicSubscription:  # pragma: no cover
+    """
+    Monitor a chat topic for changes. This work is done in a separate
+    thread from the main curses interface so that the topic can be
+    monitored without causing the interface to hang or jitter.
+    """
+    topic: str
+    ui: 'ChatUI'
+    ptr: 'ChatPointer'
+    client: 'ChatAPIClient'
+
+    def __call__(self):
+        """
+        Monitor a topic for changes, using exponential backoff when
+        the topic is idle. This should allow for quick updates if the
+        conversation is in motion, but also relax load on the backend
+        if the conversation is idle.
+
+        You may notice at this point the disadvantage of using HTTP
+        polling over something more sophisticated like WebSockets.
+        This tradeoff is made for simplicity of the client code.
+        """
+        e = 0
+        while True:
+            time.sleep(1.5 ** e)
+            if self.update():
+                # Something changed, so the conversation may be
+                # active. Raise the polling frequency so that we get
+                # new updates as soon as possible.
+                e = 1
+            else:
+                # Nothing changed since the last time, so we decrease
+                # the polling frequency in order to reduce load on the
+                # pubkey.chat infrastructure. (Click 'Sponsor' on
+                # https://github.com/robertdfrench/pubkey.chat to help
+                # defray infrastructure costs! Thank you!!)
+                if e <= 10:
+                    e += 1
+
+    def update(self) -> bool:
+        """
+        Check for updates to the topic. If there are updates, apply
+        them to the user interface.
+
+        It may help to remember here that topics are just text files
+        that contain the id of the most recent message posted to that
+        topic, just like a branch in git. So `head` and `parent`
+        represent the message id contained in this topic file.
+        """
+        head = self.client.get_head(self.topic)
+        if self.ptr.update_parent(head):
+            message = self.client.get_message(self.ptr.parent)
+            if message:
+                username = message.profile.username
+                text = message.interior().text
+                self.ui.chatbuffer_add(f"{username}: {text}")
+                return True
+        return False
 
 
 if __name__ == "__main__":  # pragma: no cover
