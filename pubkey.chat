@@ -22,15 +22,16 @@ command-line interface, cryptographic operations, and file handling.
 import argparse
 import base64
 import configparser
-from contextlib import contextmanager
+import contextlib
 import curses
-from dataclasses import dataclass
-from enum import Enum, auto
+import dataclasses
+import enum
 import hashlib
 import json
-from typing import List, Optional
+import typing
 import os
-from urllib import request
+import urllib
+import urllib.request
 import re
 import subprocess
 import tempfile
@@ -158,7 +159,10 @@ def chat_main(chat_config: str, topic: str):  # pragma: no cover
                 break
             imsg = ptr.new_interior_message(inp)
             msg = private_key.sign_data(imsg.dumps().encode())
-            client.post_message(msg)
+            try:
+                client.post_message(msg)
+            except urllib.error.HTTPError as e:
+                ui.chatbuffer_add(f"[pubkey.chat]: {e}")
 
     curses.wrapper(chat_loop)
 
@@ -373,7 +377,7 @@ class ChatUI:  # pragma: no cover
             self.redraw_chatline()
 
 
-class SigningAlgorithm(Enum):
+class SigningAlgorithm(enum.Enum):
     """
     Allowable algorithms for SSH signing keys.
 
@@ -381,8 +385,8 @@ class SigningAlgorithm(Enum):
     when parsing an Allowed Signers record or an Authorized Key
     record, we want to restrict ourselves to those two algorithms.
     """
-    RSA = auto()
-    ED25519 = auto()
+    RSA = enum.auto()
+    ED25519 = enum.auto()
 
     @classmethod
     def parse(cls, string: str) -> 'SigningAlgorithm':
@@ -412,7 +416,7 @@ class SigningAlgorithm(Enum):
             return "ssh-ed25519"
 
 
-@dataclass
+@dataclasses.dataclass
 class AuthorizedKey:
     """
     Representation of an Authorized Key entry, as seen in an
@@ -466,7 +470,7 @@ class AuthorizedKey:
         ])
 
 
-@dataclass
+@dataclasses.dataclass
 class PublicChatBucket:
     s3: 'S3Wrapper'
     lock: 'TopicLock'
@@ -512,7 +516,7 @@ class DynamoDBLock:  # pragma: no cover
         self.table.delete_item(Key={'LockID': lock_id})
 
 
-@dataclass
+@dataclasses.dataclass
 class ChatAPIClient:
     """
     Raw operations with the Chat Service backend
@@ -521,7 +525,7 @@ class ChatAPIClient:
     rest_client: 'RestClient'
 
     def get_message(
-            self, message_id: str) -> Optional['SignedMessage']:
+            self, message_id: str) -> typing.Optional['SignedMessage']:
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
         if msg_text:
@@ -546,7 +550,7 @@ class ChatAPIClient:
         return self.rest_client.post_json(url, payload)
 
 
-@dataclass
+@dataclasses.dataclass
 class InteriorMessage:
     topic: str
     parent: str
@@ -563,7 +567,7 @@ class InteriorMessage:
         return json.dumps(self.into_dict())
 
 
-@dataclass
+@dataclasses.dataclass
 class SignedMessage:
     """
     A signed copy of the original content, which can be shared with
@@ -673,7 +677,7 @@ class SignedMessage:
         return digest.hexdigest()
 
 
-@dataclass
+@dataclasses.dataclass
 class Profile:
     """
     The GitHub profile associated with `username`
@@ -688,16 +692,16 @@ class Profile:
         """URL for this user's ssh public keys"""
         return self.url() + ".keys"
 
-    def authorized_keys(self) -> List[AuthorizedKey]:
+    def authorized_keys(self) -> typing.List[AuthorizedKey]:
         """
         Grab the user's Authorized Keys from GitHub, transforming each
         of them into an AuthorizedKey object.
         """
-        with request.urlopen(self.authorized_keys_url()) as response:
+        with urllib.request.urlopen(self.authorized_keys_url()) as response:
             lines = response.read().decode().splitlines()
             return [AuthorizedKey.parse(line) for line in lines]
 
-    def allowed_signers(self) -> List[str]:
+    def allowed_signers(self) -> typing.List[str]:
         """
         Transform each Authorized Key into an ALLOWED SIGNERS record
 
@@ -740,7 +744,7 @@ class Profile:
         return self.username
 
 
-@dataclass
+@dataclasses.dataclass
 class PrivateKey:
     """
     An SSH Private Key for the GitHub user identified by the `profile`
@@ -782,7 +786,7 @@ class PrivateKey:
             return message
 
 
-@dataclass
+@dataclasses.dataclass
 class Queue():
     sqs: 'SQSWrapper'
 
@@ -796,18 +800,18 @@ class Queue():
             self.sqs.delete(message['ReceiptHandle'])
 
 
-@dataclass
+@dataclasses.dataclass
 class RestClient:  # pragma: no cover
-    def get(self, url: str) -> Optional[str]:
-        with request.urlopen(url) as response:
+    def get(self, url: str) -> typing.Optional[str]:
+        with urllib.request.urlopen(url) as response:
             return response.read().decode().rstrip()
 
     def post_json(self, url: str, payload: dict) -> str:
         data = json.dumps(payload).encode()
         headers = {'Content-Type': 'application/json'}
-        r = request.Request(
+        r = urllib.request.Request(
                 url, data=data, headers=headers, method='POST')
-        with request.urlopen(r) as response:
+        with urllib.request.urlopen(r) as response:
             return response.read().decode()
 
 
@@ -824,7 +828,7 @@ class S3Wrapper:  # pragma: no cover
             Body=value
         )
 
-    def read(self, key: str) -> Optional[str]:
+    def read(self, key: str) -> typing.Optional[str]:
         try:
             response = self.client.get_object(
                 Bucket=self.name,
@@ -836,11 +840,11 @@ class S3Wrapper:  # pragma: no cover
             return None
 
 
-@dataclass
+@dataclasses.dataclass
 class TopicLock:
     lock_table: DynamoDBLock
 
-    @contextmanager
+    @contextlib.contextmanager
     def __call__(self, topic: str):
         if not self.lock_table.acquire(topic, 2):
             raise Exception(f"Failed to acquire lock for {topic}")
@@ -868,7 +872,7 @@ class ChatPointer:
         return False
 
 
-@dataclass
+@dataclasses.dataclass
 class Signature:
     """
     The output of ssh-keygen -Y sign
@@ -923,7 +927,7 @@ class SQSWrapper:  # pragma: no cover
         self.name = name
         self.region = region
 
-    def receive(self, max_messages: int) -> List[dict]:
+    def receive(self, max_messages: int) -> typing.List[dict]:
         response = self.client.receive_message(
             QueueUrl=self.name,
             MaxNumberOfMessages=max_messages,
