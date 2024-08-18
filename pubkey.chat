@@ -58,7 +58,7 @@ DEFAULT_CONFIG_PATH = "~/.config/pubkey.chat/config.ini"
 
 def main():  # pragma: no cover
     parser = argparse.ArgumentParser(
-        description="A CLI for your curses application.")
+            description="Pubkey.Chat: You're already logged in!")
 
     # Create subparsers for the 'chat' and 'daemon' commands
     subparsers = parser.add_subparsers(
@@ -69,7 +69,7 @@ def main():  # pragma: no cover
     # Chat subcommand
     chat_parser = subparsers.add_parser(
         'chat',
-        help='Run the chat mode')
+        help='Connect and start chatting!')
     chat_parser.add_argument(
         '--config',
         metavar='CONFIG',
@@ -86,7 +86,7 @@ def main():  # pragma: no cover
     # Daemon subcommand
     daemon_parser = subparsers.add_parser(
         'daemon',
-        help='Run the daemon mode')
+        help='Launch the backend service on your own infrastructure')
     daemon_parser.add_argument(
         '--config',
         metavar='CONFIG',
@@ -117,39 +117,21 @@ def chat_main(chat_config: str, topic: str):  # pragma: no cover
     if not os.path.exists(chat_config):
         username = input("GitHub username: ")
         key_path = input("SSH Private key: ")
-        config = configparser.ConfigParser()
-        config['Credentials'] = {
-            'username': username,
-            'key_path': os.path.expanduser(key_path)
-        }
-        os.makedirs(os.path.dirname(chat_config), exist_ok=True)
-        with open(chat_config, 'w') as f:
-            config.write(f)
+        ChatConfig(username, key_path).dump(chat_config)
 
-    config = configparser.ConfigParser()
-    config.read(chat_config)
-    profile = Profile(config.get('Credentials', 'username'))
-    private_key = PrivateKey(profile, config.get('Credentials',
-                                                 'key_path'))
+    config = ChatConfig.load(chat_config)
+    profile = Profile(config.username)
+    private_key = PrivateKey(profile, config.key_path)
 
     def chat_loop(stdscr):
         ptr = ChatPointer(topic)
         client = ChatAPIClient(API_BASE_URL, RestClient())
 
         ui = ChatUI(stdscr, 16)
-        ui.userlist.append(topic)
+        ui.userlist.append(profile.username)
+        subscription = TopicSubscription(topic, ui, ptr, client)
 
-        def fetch_messages():
-            time.sleep(0.1)
-            while True:
-                if ptr.update_parent(client.get_head(topic)):
-                    msg = client.get_message(ptr.parent)
-                    user = msg.profile.username
-                    text = msg.interior().text
-                    ui.chatbuffer_add(f"{user}: {text}")
-                time.sleep(2)
-
-        comms_thread = threading.Thread(target=fetch_messages)
+        comms_thread = threading.Thread(target=subscription)
         comms_thread.daemon = True
         comms_thread.start()
 
@@ -161,6 +143,7 @@ def chat_main(chat_config: str, topic: str):  # pragma: no cover
             msg = private_key.sign_data(imsg.dumps().encode())
             try:
                 client.post_message(msg)
+                subscription.reset_sleep_duration()
             except urllib.error.HTTPError as e:
                 ui.chatbuffer_add(f"[pubkey.chat]: {e}")
 
@@ -179,22 +162,12 @@ def daemon_main(config_path: str):  # pragma: no cover
     ('bucket_name'), and the name of an SQS queue from which messages
     will be pulled ('queue_name').
     """
-    config = configparser.ConfigParser()
-    config.read(config_path)
-    s3 = S3Wrapper(
-        config['DEFAULT']['region'],
-        config['DEFAULT']['bucket_name']
-    )
-    lock_table = DynamoDBLock(
-        config['DEFAULT']['region'],
-        config['DEFAULT']['table_name']
-    )
+    config = DaemonConfig.load(config_path)
+    s3 = S3Wrapper(config.region, config.bucket_name)
+    lock_table = DynamoDBLock(config.region, config.table_name)
     lock = TopicLock(lock_table)
     bucket = PublicChatBucket(s3, lock)
-    sqs = SQSWrapper(
-        config['DEFAULT']['region'],
-        config['DEFAULT']['queue_name']
-    )
+    sqs = SQSWrapper(config.region, config.queue_name)
     queue = Queue(sqs)
     for message in queue.messages():
         try:
@@ -202,6 +175,86 @@ def daemon_main(config_path: str):  # pragma: no cover
                 bucket.write_message(message)
         except Exception as e:
             print(f"Error: {e}")
+
+
+INITIAL_SLEEP_DURATION = 0.1
+MAX_SLEEP_DURATION = 30.0
+
+
+@dataclasses.dataclass
+class ChatConfig:
+    username: str
+    key_path: str
+
+    @classmethod
+    def load(cls, path: str) -> 'ChatConfig':
+        config = configparser.ConfigParser()
+        config.read(path)
+        return cls(
+            config['Credentials']['username'],
+            config['Credentials']['key_path']
+        )
+
+    def dump(self, path: str):
+        config = configparser.ConfigParser()
+        config['Credentials'] = {
+            'username': self.username,
+            'key_path': self.key_path
+        }
+        dirname = os.path.dirname(path)
+        if dirname == '':  # pragma: no cover
+            dirname = "."
+        os.makedirs(dirname, exist_ok=True)
+        with open(path, 'w') as f:
+            config.write(f)
+
+
+@dataclasses.dataclass
+class DaemonConfig:
+    region: str
+    bucket_name: str
+    table_name: str
+    queue_name: str
+
+    @classmethod
+    def load(cls, path: str) -> 'DaemonConfig':
+        config = configparser.ConfigParser()
+        config.read(path)
+        return cls(
+            config['DEFAULT']['region'],
+            config['DEFAULT']['bucket_name'],
+            config['DEFAULT']['table_name'],
+            config['DEFAULT']['queue_name']
+        )
+
+
+@dataclasses.dataclass
+class TopicSubscription:  # pragma: no cover
+    topic: str
+    ui: 'ChatUI'
+    ptr: 'ChatPointer'
+    client: 'ChatAPIClient'
+    sleep_duration: float = INITIAL_SLEEP_DURATION
+
+    def __call__(self):
+        while True:
+            time.sleep(self.sleep_duration)
+            self.work()
+
+    def reset_sleep_duration(self):
+        self.sleep_duration = INITIAL_SLEEP_DURATION
+
+    def work(self):
+        head = self.client.get_head(self.topic)
+        if self.ptr.update_parent(head):
+            message = self.client.get_message(self.ptr.parent)
+            username = message.profile.username
+            text = message.interior().text
+            self.ui.chatbuffer_add(f"{username}: {text}")
+            self.reset_sleep_duration()
+        else:
+            if self.sleep_duration < MAX_SLEEP_DURATION:
+                self.sleep_duration *= 2
 
 
 class ChatUI:  # pragma: no cover
@@ -244,9 +297,11 @@ class ChatUI:  # pragma: no cover
         self.linebuffer = []
         self.chatbuffer = []
 
-        # Curses, why must you confuse me with your height, width, y, x
+        # Curses, why must you confuse me with your height, width, y,
+        # x
         userlist_hwyx = (curses.LINES - 2, userlist_width - 1, 0, 0)
-        chatbuffer_hwyx = (curses.LINES - 2, curses.COLS-userlist_width-1,
+        chatbuffer_hwyx = (curses.LINES - 2,
+                           curses.COLS-userlist_width-1,
                            0, userlist_width + 1)
         chatline_yx = (curses.LINES - 1, 0)
         self.win_userlist = stdscr.derwin(*userlist_hwyx)
@@ -319,10 +374,8 @@ class ChatUI:  # pragma: no cover
 
     def chatbuffer_add(self, msg):
         """
-
         Add a message to the chat buffer, automatically slicing it to
         fit the width of the buffer
-
         """
         self.chatbuffer.append(msg)
         self._linebuffer_add(msg)
@@ -350,10 +403,8 @@ class ChatUI:  # pragma: no cover
 
     def wait_input(self, prompt=""):
         """
-
         Wait for the user to input a message and hit enter.
         Returns the message
-
         """
         self.inputbuffer = prompt
         self.redraw_chatline()
@@ -525,7 +576,8 @@ class ChatAPIClient:
     rest_client: 'RestClient'
 
     def get_message(
-            self, message_id: str) -> typing.Optional['SignedMessage']:
+            self,
+            message_id: str) -> typing.Optional['SignedMessage']:
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
         if msg_text:

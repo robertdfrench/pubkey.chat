@@ -7,6 +7,7 @@ import base64
 import pytest
 import typing
 import json
+import tempfile
 from dataclasses import dataclass
 from . import pkc
 
@@ -64,7 +65,8 @@ def test_get_head():
     """
     Get the HEAD of a topic from the chat service
     """
-    rest_client = FakeRestClient(['cf971016ea65ef5ae050d86ae26249a985e0e0fcf8cf063a55e23c24a9944762'])
+    rest_client = FakeRestClient(
+            ['cf971016ea65ef5ae050d86ae26249a985e0e0fcf8cf063a55e23c24a9944762'])
     client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
     head = client.get_head('default')
     assert head == 'cf971016ea65ef5ae050d86ae26249a985e0e0fcf8cf063a55e23c24a9944762'
@@ -189,7 +191,8 @@ def test_bucket_write_message():
     bucket = pkc.PublicChatBucket(s3, pkc.TopicLock(MockLock()))
     bucket.write_message(message)
     print(s3.contents.keys())
-    assert s3.contents['messages/2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24']
+    assert s3.contents[
+            'messages/2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24']
     assert s3.contents['topics/math'] == \
         "2c9d82c0869b078be14f21c2142a71639d9eebbe89552685418a424258e7da24"
 
@@ -241,3 +244,18 @@ def test_chat_session_update():
     assert p.update_parent("x")
     assert p.parent == "x"
     assert not p.update_parent("x")
+
+def test_chat_config():
+    config = pkc.ChatConfig("a", "b")
+    with tempfile.NamedTemporaryFile() as f:
+        config.dump(f.name)
+        config = pkc.ChatConfig.load(f.name)
+        assert config.username == "a"
+        assert config.key_path == "b"
+
+def test_daemon_config():
+    config = pkc.DaemonConfig.load("tests/test_chat.ini")
+    assert config.region == "a"
+    assert config.bucket_name == "b"
+    assert config.table_name == "c"
+    assert config.queue_name == "d"

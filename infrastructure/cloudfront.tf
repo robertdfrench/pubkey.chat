@@ -70,7 +70,7 @@ resource "aws_cloudfront_distribution" "api_distribution" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/*"
+    path_pattern     = "/assets/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
     target_origin_id = "APIGateway"

@@ -3,9 +3,15 @@ resource "aws_api_gateway_rest_api" "chat" {
   description = "API for Chat Service"
 }
 
-resource "aws_api_gateway_resource" "asset_name" {
+resource "aws_api_gateway_resource" "assets" {
   rest_api_id = aws_api_gateway_rest_api.chat.id
   parent_id   = aws_api_gateway_rest_api.chat.root_resource_id
+  path_part   = "assets"
+}
+
+resource "aws_api_gateway_resource" "asset_name" {
+  rest_api_id = aws_api_gateway_rest_api.chat.id
+  parent_id   = aws_api_gateway_resource.assets.id
   path_part   = "{name}"
 }
 
@@ -138,7 +144,7 @@ resource "aws_api_gateway_integration" "get_asset" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/{name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/assets/{name}"
   request_parameters = {
     "integration.request.path.name" = "method.request.path.name"
   }
@@ -294,28 +300,32 @@ resource "aws_api_gateway_deployment" "chat" {
   triggers = {
     # This will trigger a new deployment on changes to any of these resources
     redeployment = sha1(jsonencode([
+      aws_api_gateway_resource.assets.id,
+      aws_api_gateway_resource.asset_name.id,
       aws_api_gateway_resource.messages.id,
+      aws_api_gateway_resource.topics.id,
+      aws_api_gateway_resource.messages_name.id,
+      aws_api_gateway_resource.topics_name.id,
       aws_api_gateway_method.create_message.id,
+      aws_api_gateway_method.get_message.id,
+      aws_api_gateway_method.get_topic.id,
+      aws_api_gateway_method.get_asset.id,
+      aws_api_gateway_method.get_root.id,
       aws_api_gateway_integration.create_message.id,
+      aws_api_gateway_integration.get_message.id,
+      aws_api_gateway_integration.get_topic.id,
+      aws_api_gateway_integration.get_asset.id,
+      aws_api_gateway_integration.get_root.id,
+      aws_api_gateway_method_response.get_message_200.id,
+      aws_api_gateway_method_response.get_topic_200.id,
+      aws_api_gateway_method_response.get_asset_200.id,
+      aws_api_gateway_method_response.get_root_200.id,
+      aws_api_gateway_integration_response.get_message_200.id,
+      aws_api_gateway_integration_response.get_topic_200.id,
+      aws_api_gateway_integration_response.get_asset_200.id,
+      aws_api_gateway_integration_response.get_root_200.id,
       aws_api_gateway_method_response.create_message_200.id,
       aws_api_gateway_integration_response.create_message_200.id,
-      aws_api_gateway_resource.messages_name.id,
-      aws_api_gateway_method.get_message.id,
-      aws_api_gateway_integration.get_message.id,
-      aws_api_gateway_method_response.get_message_200.id,
-      aws_api_gateway_integration_response.get_message_200.id,
-      aws_api_gateway_method.get_topic.id,
-      aws_api_gateway_integration.get_topic.id,
-      aws_api_gateway_method_response.get_topic_200.id,
-      aws_api_gateway_integration_response.get_topic_200.id,
-      aws_api_gateway_method.get_asset.id,
-      aws_api_gateway_integration.get_asset.id,
-      aws_api_gateway_method_response.get_asset_200.id,
-      aws_api_gateway_integration_response.get_asset_200.id,
-      aws_api_gateway_method.get_root.id,
-      aws_api_gateway_integration.get_root.id,
-      aws_api_gateway_method_response.get_root_200.id,
-      aws_api_gateway_integration_response.get_root_200.id,
     ]))
   }
 
@@ -342,7 +352,7 @@ resource "aws_api_gateway_stage" "prod" {
 
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.chat.arn
-    format          = "$context.requestId $context.identity.sourceIp $context.identity.caller $context.identity.user $context.requestTime $context.httpMethod $context.resourcePath $context.status $context.protocol $context.responseLength"
+    format          = "$context.requestTime $context.httpMethod $context.path ($context.resourcePath) $context.status [Err: $context.error.messageString] [IntErr: $context.integrationErrorMessage] $context.requestId"
   }
 
   variables = {
