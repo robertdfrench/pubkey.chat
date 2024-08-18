@@ -230,28 +230,14 @@ def test_interior_dumps():
     assert x.dumps() == '{"topic": "a", "parent": "b", "text": "c"}'
 
 def test_chat_session_interior():
-    s = pkc.ChatSession("a", "b", "c")
-    i = s.new_interior_message("d")
-    assert i.topic == "c"
+    p = pkc.ChatPointer("a")
+    i = p.new_interior_message("b")
+    assert i.topic == "a"
     assert i.parent == ""
-    assert i.text == "d"
-
-def test_chat_session_history():
-    s = pkc.ChatSession("a", "b", "c")
-    s.history = ["1", "2", "3", "4", "5"]
-    assert s.get_history(3) == ["3", "4", "5"]
+    assert i.text == "b"
 
 def test_chat_session_update():
-    s = pkc.ChatSession("a", "b", "c")
-    assert s.update_parent("x")
-    assert s.parent == "x"
-    assert not s.update_parent("x")
-
-def test_chat_session_append():
-    s = pkc.ChatSession("a", "b", "c")
-    interior = s.new_interior_message("hello")
-    profile = pkc.Profile('user')
-    signature = pkc.Signature('f')
-    msg = pkc.SignedMessage(profile, interior.dumps().encode(), signature)
-    s.append(msg)
-    assert s.history[0] == "user: hello"
+    p = pkc.ChatPointer("a")
+    assert p.update_parent("x")
+    assert p.parent == "x"
+    assert not p.update_parent("x")

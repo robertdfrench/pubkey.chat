@@ -199,7 +199,8 @@ def daemon_main(config_path: str):  # pragma: no cover
         except Exception as e:
             print(f"Error: {e}")
 
-class ChatUI:
+
+class ChatUI:  # pragma: no cover
     """
     This class comes from https://github.com/calzoneman/python-chatui
     and is licensed as follows:
@@ -232,7 +233,7 @@ class ChatUI:
         stdscr.clear()
         curses.use_default_colors()
         for i in range(0, curses.COLORS):
-            curses.init_pair(i, i, -1);
+            curses.init_pair(i, i, -1)
         self.stdscr = stdscr
         self.userlist = []
         self.inputbuffer = ""
@@ -247,7 +248,7 @@ class ChatUI:
         self.win_userlist = stdscr.derwin(*userlist_hwyx)
         self.win_chatline = stdscr.derwin(*chatline_yx)
         self.win_chatbuffer = stdscr.derwin(*chatbuffer_hwyx)
-        
+
         self.redraw_ui()
 
     def resize(self):
@@ -297,7 +298,6 @@ class ChatUI:
         for i, name in enumerate(self.userlist):
             if i >= h:
                 break
-            #name = name.ljust(w - 1) + "|"
             self.win_userlist.addstr(i, 0, name[:w - 1])
         self.win_userlist.refresh()
 
@@ -544,71 +544,6 @@ class ChatAPIClient:
         url = f"{self.api_base_url}/messages"
         payload = message.into_dict()
         return self.rest_client.post_json(url, payload)
-
-
-class ChatInterface:  # pragma: no cover
-    def __init__(self, stdscr, session: 'ChatSession'):
-        self.stdscr = stdscr
-        self.session = session
-        self.current_input = ""
-        self.client = ChatAPIClient(API_BASE_URL, RestClient())
-
-        curses.curs_set(0)  # Hide cursor
-        stdscr.nodelay(1)  # Don't block when waiting for input
-        stdscr.timeout(1000)  # Refresh every second
-
-        self.messages_win = curses.newwin(
-                curses.LINES - 3, curses.COLS, 0, 0)
-        self.input_win = curses.newwin(
-                3, curses.COLS, curses.LINES - 3, 0)
-
-        self.draw_input_window()
-
-    def draw_input_window(self):
-        self.input_win.addstr(1, 1, f"> {self.current_input}")
-        self.input_win.refresh()
-
-    def post_message(self, text: str):
-        interior = self.session.new_interior_message(text)
-        profile = Profile(self.session.username)
-        pk = PrivateKey(profile, self.session.key_path)
-        signed_message = pk.sign_data(interior.dumps().encode())
-        self.client.post_message(signed_message)
-
-    def update_messages(self):
-        # This can lose messages
-        current_parent = self.client.get_head(self.session.topic)
-        if self.session.update_parent(current_parent):
-            head_msg = self.client.get_message(current_parent)
-            self.session.append(head_msg)
-
-    def redraw(self):
-        self.messages_win.clear()
-        self.input_win.clear()  # maybe not the first time?
-        self.draw_input_window()
-        display_history = self.session.get_history(curses.LINES - 3)
-        for i, text in enumerate(display_history):
-            self.messages_win.addstr(i, 0, text)
-        self.messages_win.refresh()
-        self.input_win.refresh()
-
-    def check_input(self):
-        key = self.stdscr.getch()
-        if key == curses.KEY_RESIZE:
-            # Resize windows if terminal size changes
-            self.messages_win.resize(curses.LINES - 3, curses.COLS)
-            self.input_win.resize(3, curses.COLS)
-            self.input_win.mvwin(curses.LINES - 3, 0)
-        elif key == ord('\n'):
-            if self.current_input.strip():
-                self.post_message(self.current_input.strip())
-                self.current_input = ""
-        elif key == 27:  # Escape key
-            raise "escape"
-        elif key == curses.KEY_BACKSPACE or key == 127:
-            self.current_input = self.current_input[:-1]
-        elif key != -1:
-            self.current_input += chr(key)
 
 
 @dataclass
@@ -931,11 +866,6 @@ class ChatPointer:
             self.parent = new_parent
             return True
         return False
-# 
-#     def append(self, message: 'SignedMessage'):
-#         username = message.profile.username
-#         interior_text = message.interior().text
-#         self.history.append(f"{username}: {interior_text}")
 
 
 @dataclass

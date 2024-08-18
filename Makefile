@@ -6,6 +6,7 @@ deploy: test #: Deploy to production
 
 test: lint typecheck check #: Run all tests
 	$(MAKE) -C infrastructure test
+	$(MAKE) -C website test
 
 clean: build_clean #: Clean all intermediate cruft
 	rm -rf .venv
