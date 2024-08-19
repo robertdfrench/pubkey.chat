@@ -4,10 +4,11 @@
 #
 # Copyright 2024 Robert D. French
 import base64
-import pytest
-import typing
 import json
+import pathlib
+import pytest
 import tempfile
+import typing
 from dataclasses import dataclass
 from . import pkc
 
@@ -270,7 +271,7 @@ def test_chat_config():
         config.dump(f.name)
         config = pkc.ChatConfig.load(f.name)
         assert config.username == "a"
-        assert config.key_path == "b"
+        assert str(config.key_path) == "b"
 
 def test_daemon_config():
     config = pkc.DaemonConfig.load("tests/test_chat.ini")

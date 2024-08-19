@@ -29,6 +29,7 @@ import enum
 import hashlib
 import json
 import os
+import pathlib
 import re
 import subprocess
 import tempfile
@@ -112,12 +113,12 @@ def main():  # pragma: no cover
 
     # Execute the corresponding function based on the subcommand
     if args.command == 'chat':
-        chat_main(args.config, Topic(args.topic))
+        chat_main(pathlib.Path(args.config), Topic(args.topic))
     elif args.command == 'daemon':
         daemon_main(args.config)
 
 
-def chat_main(chat_config: str, topic: 'Topic'):  # pragma: no cover
+def chat_main(chat_config: pathlib.Path, topic: 'Topic'):  # pragma: no cover
     """
     Open a chat window for 'topic'
 
@@ -130,7 +131,7 @@ def chat_main(chat_config: str, topic: 'Topic'):  # pragma: no cover
     # the information we need to create it.
     if not os.path.exists(chat_config):
         username = input("GitHub username: ")
-        key_path = input("SSH Private key: ")
+        key_path = pathlib.Path(input("SSH Private key: "))
         ChatConfig(username, key_path).dump(chat_config)
 
     # Load the chat config from disk and extract the 'profile' and
@@ -339,10 +340,10 @@ class ChatConfig:
     preferred SSH private key (for signing messages).
     """
     username: str
-    key_path: str
+    key_path: pathlib.Path
 
     @classmethod
-    def load(cls, path: str) -> 'ChatConfig':
+    def load(cls, path: pathlib.Path) -> 'ChatConfig':
         """
         Load a config object from disk
         """
@@ -350,17 +351,17 @@ class ChatConfig:
         config.read(path)
         return cls(
             config['Credentials']['username'],
-            config['Credentials']['key_path']
+            pathlib.Path(config['Credentials']['key_path'])
         )
 
-    def dump(self, path: str):
+    def dump(self, path: pathlib.Path):
         """
         Write a config object to disk
         """
         config = configparser.ConfigParser()
         config['Credentials'] = {
             'username': self.username,
-            'key_path': self.key_path
+            'key_path': str(self.key_path)
         }
         dirname = os.path.dirname(path)
 
@@ -695,7 +696,7 @@ class PrivateKey:
     object.
     """
     profile: 'Profile'
-    path: str
+    path: pathlib.Path
 
     def sign(self, file: str):
         """
