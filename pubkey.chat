@@ -755,7 +755,8 @@ class Profile:
         Grab the user's Authorized Keys from GitHub, transforming each
         of them into an AuthorizedKey object.
         """
-        with urllib.request.urlopen(self.authorized_keys_url()) as response:
+        url = self.authorized_keys_url()
+        with urllib.request.urlopen(url) as response:
             lines = response.read().decode().splitlines()
             return [AuthorizedKey.parse(line) for line in lines]
 
@@ -848,25 +849,60 @@ class PublicChatBucket:
 
 @dataclasses.dataclass
 class Queue():
+    """
+    A generator of unverified WMAP messages.
+    """
     sqs: 'SQSWrapper'
 
     def messages(self):
+        """
+        This is a generator, which can be used in a loop. Every
+        unverified message is sent to the context of the loop, and is
+        deleted afterwords. For example:
+
+            for msg in queue.messages():
+                print(msg.profile)
+
+        This would print the author of each message, as soon as the
+        message is visible in the queue, and would delete the message
+        automatically before proceeding to the next message.
+        """
         while True:
+            # Get at most one message from the queue. If we get zero
+            # messages, just try again -- there is a 20s delay, so
+            # it's not like we are slamming SQS here.
             candidates = self.sqs.receive(1)
             if len(candidates) == 0:  # pragma: no cover
                 continue
+
+            # Hand our 1 message over to the loop body
             message = candidates[0]
             yield SignedMessage.from_dict(json.loads(message['Body']))
+
+            # Delete the message from the queue so that it doesn't get
+            # reprocessed.
             self.sqs.delete(message['ReceiptHandle'])
 
 
 @dataclasses.dataclass
 class RestClient:  # pragma: no cover
+    """
+    Nearly-raw (slightly-cooked?) HTTP requests to the Pubkey.Chat
+    backend.
+    """
     def get(self, url: str) -> typing.Optional[str]:
+        """
+        Issue an HTTP GET request for `url`.
+        """
         with urllib.request.urlopen(url) as response:
+            # The request will come back as a "bytes" object, so we
+            # need to decode it, and remove any trailing whitespace.
             return response.read().decode().rstrip()
 
     def post_json(self, url: str, payload: dict) -> str:
+        """
+        POST a dictionary `payload` as JSON to `url`
+        """
         data = json.dumps(payload).encode()
         headers = {'Content-Type': 'application/json'}
         r = urllib.request.Request(
@@ -876,12 +912,28 @@ class RestClient:  # pragma: no cover
 
 
 class S3Wrapper:  # pragma: no cover
-    def __init__(self, region, name):
+    """
+    Storage access to S3. This wrapper is easier to mock than the S3
+    client, since it only sports the subset of features that we need.
+
+    In particular, we'll be doing these things:
+
+    * Writing messages to /messages/{message_id}
+    * Writing topics to /topics/{topic_name}
+    * Reading topics from /topics/{topic_name}
+
+    We won't be readying messages in this app; That is handled
+    automatically by the API Gateway configuration.
+    """
+    def __init__(self, region: str, name: str):
         import boto3  # type: ignore
         self.client = boto3.client('s3', region_name=region)
         self.name = name
 
     def write(self, key: str, value: str):
+        """
+        Try store `value` at the bucket address given in `key`.
+        """
         self.client.put_object(
             Bucket=self.name,
             Key=key,
@@ -889,6 +941,9 @@ class S3Wrapper:  # pragma: no cover
         )
 
     def read(self, key: str) -> typing.Optional[str]:
+        """
+        Try to read a string from the bucket address given in `key`.
+        """
         try:
             response = self.client.get_object(
                 Bucket=self.name,
@@ -979,6 +1034,12 @@ class SignedMessage:
 
     @classmethod
     def from_dict(cls, parts: dict[str, str]) -> 'SignedMessage':
+        """
+        Construct a new SignedMessage from a dictionary of `profile`,
+        `body`, and `signature`. This will not verify the message, so
+        if it is constructed out of junk, you will have a
+        "SignedMessage" that isn't necessarily signed.
+        """
         profile = Profile(parts['profile'])
         body = base64.b64decode(parts['body'].encode())
         signature = Signature(parts['signature'])
@@ -1052,6 +1113,12 @@ class SignedMessage:
                     self.body, sigfile.name)
 
     def interior(self) -> InteriorMessage:
+        """
+        Extract the "Interior" (or chat-oriented) message from the
+        body of this message. Since the body of this message is a
+        base64 bytes object, we can decode it to text and then load it
+        as json.
+        """
         i = json.loads(self.body.decode())
         if 'text' in i:
             text = i['text']
@@ -1060,6 +1127,10 @@ class SignedMessage:
         return InteriorMessage(i['topic'], i['parent'], text)
 
     def digest(self) -> str:
+        """
+        Compute the sha256 hash of the entire message (not just the
+        body!). This will serve as the id for the message.
+        """
         digest = hashlib.sha256()
         digest.update(self.dumps().encode())
         return digest.hexdigest()
@@ -1105,6 +1176,10 @@ class SigningAlgorithm(enum.Enum):
 
 
 class SQSWrapper:  # pragma: no cover
+    """
+    This is a minimal shim over the boto3 sqs client, which implements
+    only the functionality we need in this app.
+    """
     name: str
     region: str
 
@@ -1115,6 +1190,9 @@ class SQSWrapper:  # pragma: no cover
         self.region = region
 
     def receive(self, max_messages: int) -> typing.List[dict]:
+        """
+        Spend up to 20 seconds trying to receive up to `max_messages`.
+        """
         response = self.client.receive_message(
             QueueUrl=self.name,
             MaxNumberOfMessages=max_messages,
@@ -1123,21 +1201,37 @@ class SQSWrapper:  # pragma: no cover
         return response.get('Messages', [])
 
     def delete(self, receipt_handle: str):
+        """
+        Acknowledge the message so that it doesn't show up in the
+        queue again.
+        """
         self.client.delete_message(
             QueueUrl=self.name,
             ReceiptHandle=receipt_handle
         )
 
-    def __repr__(self) -> str:
-        return f"SQSWrapper({self.region}, {self.name})"
-
 
 @dataclasses.dataclass
 class TopicLock:
+    """
+    An expirable lock for a single topic. Prevents other queue workers
+    from modifying the same topic simultaneously.
+    """
     lock_table: DynamoDBLock
 
     @contextlib.contextmanager
     def __call__(self, topic: str):
+        """
+        Run some code in the context of a lock. For example:
+
+            with lock(topic):
+                print(topic)
+
+        This would prevent any other queue worker from printing the
+        same topic at the same time. The lock is automatically
+        acquired at the beginning of the "with" statement, and
+        automatically released afterwards.
+        """
         if not self.lock_table.acquire(topic, 2):
             raise Exception(f"Failed to acquire lock for {topic}")
         try:
