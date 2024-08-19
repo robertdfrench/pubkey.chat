@@ -278,3 +278,7 @@ def test_daemon_config():
     assert config.bucket_name == "b"
     assert config.table_name == "c"
     assert config.queue_name == "d"
+
+def test_topic():
+    t = pkc.Topic("number-theory")
+    assert str(t) == "number-theory"

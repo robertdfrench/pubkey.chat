@@ -112,12 +112,12 @@ def main():  # pragma: no cover
 
     # Execute the corresponding function based on the subcommand
     if args.command == 'chat':
-        chat_main(args.config, args.topic)
+        chat_main(args.config, Topic(args.topic))
     elif args.command == 'daemon':
         daemon_main(args.config)
 
 
-def chat_main(chat_config: str, topic: str):  # pragma: no cover
+def chat_main(chat_config: str, topic: 'Topic'):  # pragma: no cover
     """
     Open a chat window for 'topic'
 
@@ -263,7 +263,7 @@ class AuthorizedKey:
         - profile: the profile of the GitHub user for whom we'd like
           to build the ALLOWED SIGNERS record.
         """
-        principal = profile.username
+        principal = str(profile)
         algorithm = str(self.algorithm)
         material = self.material
         return " ".join([
@@ -303,7 +303,7 @@ class ChatAPIClient:
         else:
             return None
 
-    def get_head(self, topic: str) -> str:
+    def get_head(self, topic: 'Topic') -> str:
         """
         Get the id of the message most recently appended to `topic`.
         """
@@ -381,7 +381,7 @@ class ChatPointer:
     """
     Reference to the current HEAD of the topic.
     """
-    topic: str
+    topic: 'Topic'
     parent: str = ""
 
     def new_interior_message(self, text: str) -> 'InteriorMessage':
@@ -666,7 +666,7 @@ class InteriorMessage:
     send the message, and the id of the current topic HEAD which
     should (hopefully) prove that the user has been paying attention.
     """
-    topic: str
+    topic: 'Topic'
     parent: str
     text: str
 
@@ -675,7 +675,7 @@ class InteriorMessage:
         helper function for `dumps`, below.
         """
         return {
-                'topic': self.topic,
+                'topic': str(self.topic),
                 'parent': self.parent,
                 'text': self.text
         }
@@ -1212,6 +1212,14 @@ class SQSWrapper:  # pragma: no cover
 
 
 @dataclasses.dataclass
+class Topic:
+    _str: str
+
+    def __str__(self) -> str:
+        return self._str
+
+
+@dataclasses.dataclass
 class TopicLock:
     """
     An expirable lock for a single topic. Prevents other queue workers
@@ -1220,7 +1228,7 @@ class TopicLock:
     lock_table: DynamoDBLock
 
     @contextlib.contextmanager
-    def __call__(self, topic: str):
+    def __call__(self, topic: Topic):
         """
         Run some code in the context of a lock. For example:
 
@@ -1232,12 +1240,12 @@ class TopicLock:
         acquired at the beginning of the "with" statement, and
         automatically released afterwards.
         """
-        if not self.lock_table.acquire(topic, 2):
+        if not self.lock_table.acquire(str(topic), 2):
             raise Exception(f"Failed to acquire lock for {topic}")
         try:
             yield
         finally:
-            self.lock_table.release(topic)
+            self.lock_table.release(str(topic))
 
 
 @dataclasses.dataclass
@@ -1247,7 +1255,7 @@ class TopicSubscription:  # pragma: no cover
     thread from the main curses interface so that the topic can be
     monitored without causing the interface to hang or jitter.
     """
-    topic: str
+    topic: Topic
     ui: 'ChatUI'
     ptr: 'ChatPointer'
     client: 'ChatAPIClient'
@@ -1294,7 +1302,7 @@ class TopicSubscription:  # pragma: no cover
         if self.ptr.update_parent(head):
             message = self.client.get_message(self.ptr.parent)
             if message:
-                username = message.profile.username
+                username = str(message.profile)
                 text = message.interior().text
                 self.ui.chatbuffer_add(f"{username}: {text}")
                 return True
