@@ -93,15 +93,34 @@ def test_get_message():
     rest_client = FakeRestClient([
         json.dumps(
             {
-                'profile': 'a',
-                'body': 'Yg==',
-                'signature': 'c'
+                'profile': 'robertdfrench',
+                'body': 'Ygo=',
+                'signature': 'LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFSY0FBQUFIYzNOb0xYSnpZUUFBQUFNQkFBRUFBQUVCQU16eGUrdGo4Nk44TnhvajRXOUJWWApuSG56VzBScXlrcmtDZ2xvZFBNbjd5Y2ZMcWpTdGNBTE15STBsZ24zSmVIZHU4R0xiTlpYMkNlL0huN0hHMWVtNERUN096CnhaUXpwcTZ2SmR0MFMzVi8zK0w2TW1URC9JQURSNzRYblIyRWtZUGg0UXJ1QzhSMTVuZ0tKQ29xcC8vWEN1d3pBWmlzQjQKNG1OdXJWTWlGR01pQkpnWUpJUEFKcjk3OWdkdm1hM1hvWnFGaTUrdkc4TmhRMXlQTHZuRTZCaHdLQjdqU0xjQllIVDl2UwpJeDdKOCswRjNYZE9Xd0VScGZwQzhUeS8zVVhtUWVMa1RzQi9INWNGRFB4RHJLMjVqVWpvZDhleGtYajJERC9VYW44VWhrCjZDVGJEeFRmNlRKK3ZwSXhSM2VRVWVDU1BpS2prOTNzaVJCcUY0NzhFQUFBQU5kMjFoY0VCM2JXRndMbVJsZGdBQUFBQUEKQUFBR2MyaGhOVEV5QUFBQkZBQUFBQXh5YzJFdGMyaGhNaTAxTVRJQUFBRUFZc2RBNXRPQlY3a2pGbVpnQktlRUhtNkw1ZwpkMTk0Z01nV0hRZWdwUityTWZEUHpaQVEwMlJhaExrK0FncWxUM292MTEwS29YbGFzQlJweVpaMW1DcTE0ZjRSMWpwaXJFCmRXbzBWUXhvL1c3NlFMb2F5UjFucFdHZTZVZWZ0eGIvN0FOM05Va3ZCaVYvRStEd0drOTlRTSt5Y3M1SnR2dk1XK2Z3Y0oKaFVqeStteXRkcjUrSWZha09pM2hpS2RiZzMzMVZYWVJ2S1VuS05rUnJvcnhYbTdBbTBsaDlCWDROWGplbUFVeGlMbXpFNAp2QWhZakxldkZPejBua052eVpzbXRYaUx1NzBRZU5aTkJWK1NkWi83R2NkVy9nRG8rVUNHaW43YW8wdllLOUxIOHR4S0k5CmdPZVcxZ3V6WWdmM2xIVWFlaFU2ZzNpU285UlZxbnVBemNVQT09Ci0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo='
             }
         )
     ])
     client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
     msg = client.get_message('aaa')
-    assert msg.profile.username == 'a'
+    assert msg.profile.username == 'robertdfrench'
+
+
+def test_invalid_message():
+    """
+    Show that we *cannot* get an invalid message from the chat
+    service.
+    """
+    rest_client = FakeRestClient([
+        json.dumps(
+            {
+                'profile': 'robertdfrench',
+                'body': 'aW52YWxpZCBtZXNzYWdl',
+                'signature': 'LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFSY0FBQUFIYzNOb0xYSnpZUUFBQUFNQkFBRUFBQUVCQU16eGUrdGo4Nk44TnhvajRXOUJWWApuSG56VzBScXlrcmtDZ2xvZFBNbjd5Y2ZMcWpTdGNBTE15STBsZ24zSmVIZHU4R0xiTlpYMkNlL0huN0hHMWVtNERUN096CnhaUXpwcTZ2SmR0MFMzVi8zK0w2TW1URC9JQURSNzRYblIyRWtZUGg0UXJ1QzhSMTVuZ0tKQ29xcC8vWEN1d3pBWmlzQjQKNG1OdXJWTWlGR01pQkpnWUpJUEFKcjk3OWdkdm1hM1hvWnFGaTUrdkc4TmhRMXlQTHZuRTZCaHdLQjdqU0xjQllIVDl2UwpJeDdKOCswRjNYZE9Xd0VScGZwQzhUeS8zVVhtUWVMa1RzQi9INWNGRFB4RHJLMjVqVWpvZDhleGtYajJERC9VYW44VWhrCjZDVGJEeFRmNlRKK3ZwSXhSM2VRVWVDU1BpS2prOTNzaVJCcUY0NzhFQUFBQU5kMjFoY0VCM2JXRndMbVJsZGdBQUFBQUEKQUFBR2MyaGhOVEV5QUFBQkZBQUFBQXh5YzJFdGMyaGhNaTAxTVRJQUFBRUFZc2RBNXRPQlY3a2pGbVpnQktlRUhtNkw1ZwpkMTk0Z01nV0hRZWdwUityTWZEUHpaQVEwMlJhaExrK0FncWxUM292MTEwS29YbGFzQlJweVpaMW1DcTE0ZjRSMWpwaXJFCmRXbzBWUXhvL1c3NlFMb2F5UjFucFdHZTZVZWZ0eGIvN0FOM05Va3ZCaVYvRStEd0drOTlRTSt5Y3M1SnR2dk1XK2Z3Y0oKaFVqeStteXRkcjUrSWZha09pM2hpS2RiZzMzMVZYWVJ2S1VuS05rUnJvcnhYbTdBbTBsaDlCWDROWGplbUFVeGlMbXpFNAp2QWhZakxldkZPejBua052eVpzbXRYaUx1NzBRZU5aTkJWK1NkWi83R2NkVy9nRG8rVUNHaW43YW8wdllLOUxIOHR4S0k5CmdPZVcxZ3V6WWdmM2xIVWFlaFU2ZzNpU285UlZxbnVBemNVQT09Ci0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo='
+            }
+        )
+    ])
+    client = pkc.ChatAPIClient(pkc.API_BASE_URL, rest_client)
+    msg = client.get_message('aaa')
+    assert msg is None
 
 
 def test_no_message():

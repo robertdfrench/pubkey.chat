@@ -277,7 +277,8 @@ class AuthorizedKey:
 @dataclasses.dataclass
 class ChatAPIClient:
     """
-    Raw operations with the Chat Service backend
+    Communication with the Pubkey.Chat backend. Updates messages,
+    reads messages, and reads topics.
     """
     api_base_url: str
     rest_client: 'RestClient'
@@ -285,14 +286,27 @@ class ChatAPIClient:
     def get_message(
             self,
             message_id: str) -> typing.Optional['SignedMessage']:
+        """
+        Get the signed message named `message_id` from the Pubkey.Chat
+        backend. Re-validate locally to defend against a compromise of
+        Pubkey.Chat. Returns None if message does not exist or is not
+        valid.
+        """
         url = f"{self.api_base_url}/messages/{message_id}"
         msg_text = self.rest_client.get(url)
         if msg_text:
-            return SignedMessage.loads(msg_text)
+            message = SignedMessage.loads(msg_text)
+            if message.is_valid():
+                return message
+            else:
+                return None
         else:
             return None
 
     def get_head(self, topic: str) -> str:
+        """
+        Get the id of the message most recently appended to `topic`.
+        """
         url = f"{self.api_base_url}/topics/{topic}"
         response = self.rest_client.get(url)
         if not response:
@@ -304,6 +318,14 @@ class ChatAPIClient:
             return ""
 
     def post_message(self, message: 'SignedMessage') -> str:
+        """
+        Post a new message. If the message is valid, the Pubkey.chat
+        backend service will make it available for download.
+        Additionally, if it contains a chat-friendly 'InteriorMessage'
+        which points to the current HEAD of the topic indicated in
+        that message, the Pubkey.chat backend will update the topic
+        HEAD so that this message will appear as part of the chat log.
+        """
         url = f"{self.api_base_url}/messages"
         payload = message.into_dict()
         return self.rest_client.post_json(url, payload)
@@ -354,18 +376,29 @@ class ChatConfig:
             config.write(f)
 
 
+@dataclasses.dataclass
 class ChatPointer:
+    """
+    Reference to the current HEAD of the topic.
+    """
     topic: str
-    parent: str
-
-    def __init__(self, topic: str):
-        self.topic = topic
-        self.parent = ""
+    parent: str = ""
 
     def new_interior_message(self, text: str) -> 'InteriorMessage':
+        """
+        Create a new InteriorMessage object which refers to the HEAD
+        of this topic. InteriorMessages which do not refer to HEAD
+        will not be accepted by the Pubkey.Chat backend service.
+        """
         return InteriorMessage(self.topic, self.parent, text)
 
     def update_parent(self, new_parent) -> bool:
+        """
+        Return true if the "new" parent is different than the current
+        one. If it is different, retain it is the current parent. This
+        is useful for updating state *and* checking if new work needs
+        to be done, all in one motion.
+        """
         if new_parent != self.parent:
             self.parent = new_parent
             return True
@@ -626,11 +659,21 @@ class DynamoDBLock:  # pragma: no cover
 
 @dataclasses.dataclass
 class InteriorMessage:
+    """
+    This is the chat-oriented message which is signed, and placed
+    inside a WMAP container (a SignedMessage object). It contains
+    the message sent by the user, the topic to which they'd like to
+    send the message, and the id of the current topic HEAD which
+    should (hopefully) prove that the user has been paying attention.
+    """
     topic: str
     parent: str
     text: str
 
     def into_dict(self) -> dict[str, str]:
+        """
+        helper function for `dumps`, below.
+        """
         return {
                 'topic': self.topic,
                 'parent': self.parent,
@@ -638,6 +681,10 @@ class InteriorMessage:
         }
 
     def dumps(self) -> str:
+        """
+        Return a json-formatted string representing the contents of
+        this object.
+        """
         return json.dumps(self.into_dict())
 
 
@@ -672,6 +719,11 @@ class PrivateKey:
 
     def sign_data(
             self, data: bytes) -> 'SignedMessage':  # pragma: no cover
+        """
+        Like the `sign` method, but works on a "bytes" object instead
+        of a file. This is handy if the data you'd like to sign
+        resides in memory rather than on disk.
+        """
         with tempfile.NamedTemporaryFile() as f:
             sigfile = f.name + ".sig"
             f.write(data)
@@ -983,6 +1035,16 @@ class SignedMessage:
         return json.dumps(self.into_dict())
 
     def is_valid(self) -> bool:
+        """
+        Validate this message against the alleged author's GitHub
+        public keys. If the message is not valid for any of the public
+        keys *currently* available for the alleged author on GitHub,
+        then we assume the message has been forged.
+
+        A consequence of this decision is that once a public key has
+        been removed from GitHub, messages signed with it will no
+        longer be valid.
+        """
         with tempfile.NamedTemporaryFile() as sigfile:
             self.signature.dump(sigfile.name)
             sigfile.flush()
