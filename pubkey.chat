@@ -115,7 +115,7 @@ def main():  # pragma: no cover
     if args.command == 'chat':
         chat_main(pathlib.Path(args.config), Topic(args.topic))
     elif args.command == 'daemon':
-        daemon_main(args.config)
+        daemon_main(pathlib.Path(args.config))
 
 
 def chat_main(chat_config: pathlib.Path, topic: 'Topic'):  # pragma: no cover
@@ -187,7 +187,7 @@ def chat_main(chat_config: pathlib.Path, topic: 'Topic'):  # pragma: no cover
     curses.wrapper(chat_loop)
 
 
-def daemon_main(config_path: str):  # pragma: no cover
+def daemon_main(config_path: pathlib.Path):  # pragma: no cover
     """
     Launch the chat service
 
@@ -204,10 +204,13 @@ def daemon_main(config_path: str):  # pragma: no cover
     # sqs (for awaiting new messages), and DynamoDB (for synchronizing
     # access to topics among all the daemon hosts).
     config = DaemonConfig.load(config_path)
-    s3 = S3Wrapper(config.region, config.bucket_name)
+
     lock_table = DynamoDBLock(config.region, config.table_name)
     lock = TopicLock(lock_table)
+
+    s3 = S3Wrapper(config.region, config.bucket_name)
     bucket = PublicChatBucket(s3, lock)
+
     sqs = SQSWrapper(config.region, config.queue_name)
     queue = Queue(sqs)
 
@@ -590,7 +593,7 @@ class DaemonConfig:
     queue_name: str
 
     @classmethod
-    def load(cls, path: str) -> 'DaemonConfig':
+    def load(cls, path: pathlib.Path) -> 'DaemonConfig':
         """
         Load the daemon config from disk
         """
@@ -671,7 +674,7 @@ class InteriorMessage:
     parent: str
     text: str
 
-    def into_dict(self) -> dict[str, str]:
+    def into_dict(self) -> typing.Dict[str, str]:
         """
         helper function for `dumps`, below.
         """
@@ -1034,7 +1037,8 @@ class SignedMessage:
         return cls(profile, body, signature)
 
     @classmethod
-    def from_dict(cls, parts: dict[str, str]) -> 'SignedMessage':
+    def from_dict(cls,
+                  parts: typing.Dict[str, str]) -> 'SignedMessage':
         """
         Construct a new SignedMessage from a dictionary of `profile`,
         `body`, and `signature`. This will not verify the message, so
@@ -1068,7 +1072,7 @@ class SignedMessage:
         d = json.loads(data)
         return cls.from_dict(d)
 
-    def into_dict(self) -> dict[str, str]:
+    def into_dict(self) -> typing.Dict[str, str]:
         """
         Convert this object into a python dictionary, and convert each
         of its fields into their string representation.

@@ -148,7 +148,7 @@ def test_post_message():
             }
 
 class MockSQSWrapper:
-    def __init__(self, messages: list[dict]):
+    def __init__(self, messages: typing.List[dict]):
         self.messages = list(messages)
         self.messages.reverse()
 
@@ -180,12 +180,12 @@ def test_queue_iterate():
 
 @dataclass
 class MockS3Wrapper:
-    contents: dict[str, str]
+    contents: typing.Dict[str, str]
 
     def write(self, key: str, value: str):
         self.contents[key] = value
 
-    def read(self, key: str) -> str | None:
+    def read(self, key: str) -> typing.Optional[str]:
         return self.contents.get(key, None)
 
 
