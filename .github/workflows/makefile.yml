@@ -7,6 +7,20 @@ on:
     branches: [ "trunk" ]
 
 jobs:
+  lint-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install HashiCorp Tools
+      run: |
+        wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt-get update
+        sudo apt-get install terraform
+        sudo apt-get install packer
+    - name: Lint Infrastructure
+      run: make test_infrastructure
+
   linux:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -14,12 +28,7 @@ jobs:
         os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
     steps:
     - uses: actions/checkout@v4
-    - name: Install Terraform
-      run: |
-        wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-        sudo apt update && sudo apt install terraform
-    - run: make test
+    - run: make test_client
 
   macos:
     runs-on: ${{ matrix.os }}
@@ -28,8 +37,10 @@ jobs:
         os: [macos-12, macos-13, macos-14]
     steps:
     - uses: actions/checkout@v4
-    - name: Install Terraform
-      run: |
-        brew tap hashicorp/tap
-        brew install hashicorp/tap/terraform
-    - run: make test
+    - run: make test_client
+
+  all:
+    needs: [lint-infrastructure, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo done

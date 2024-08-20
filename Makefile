@@ -1,12 +1,16 @@
-include common.mk
+include lib/common.mk
+include lib/venv.mk
 
 deploy: test #: Deploy to production
 	$(MAKE) -C infrastructure apply
 	$(MAKE) -C website deploy
 
-test: lint typecheck check #: Run all tests
+test: test_client test_infrastructure #: Run all tests
+
+test_client: lint typecheck check #: Test the client code
+
+test_infrastructure:
 	$(MAKE) -C infrastructure test
-	$(MAKE) -C website test
 
 clean: build_clean #: Clean all intermediate cruft
 	rm -rf .venv

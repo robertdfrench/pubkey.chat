@@ -1,9 +1,11 @@
-include ../../common.mk
+include ../../lib/common.mk
+include ../../lib/venv.mk
 
 SOURCES = chat.service provisioner.sh build/pubkey.chat packer.pkr.hcl
 
-test: #: Run a fake test
-	@echo "okay!"
+test: build/variables.pkrvars.hcl build/pkr_init #: Lint the Packer config
+	packer fmt -diff .
+	packer validate -var-file=$< .
 
 ami: build/ami_name.txt update_ami_cache #: Build the latest AMI
 	make build/amis/`cat $<`
@@ -11,7 +13,7 @@ ami: build/ami_name.txt update_ami_cache #: Build the latest AMI
 update_ami_cache: build/image_name_id_pairs.sh #: Get Latest AMIs from Amazon
 	sh $<
 
-build/amis/%: build/variables.pkrvars.hcl build/amis/.dir $(SOURCES)
+build/amis/%: build/variables.pkrvars.hcl build/amis/.dir build/pkr_init $(SOURCES)
 	packer build -var-file=$< packer.pkr.hcl
 	touch $@
 
@@ -29,5 +31,9 @@ build/ami_name.txt: $(SOURCES) build/.dir
 
 build/pubkey.chat: ../../pubkey.chat build/.dir
 	cp $< $@
+
+build/pkr_init: build/.dir
+	packer init .
+	touch $@
 
 clean: clean_build #: Clean up intermediate artifacts

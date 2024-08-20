@@ -11,10 +11,11 @@ data "aws_ami" "packer_ami" {
   }
 }
 
-# Create an S3 bucket
-resource "aws_s3_bucket" "chat_service_bucket" {
-  bucket        = "objects-dot-pubkey-dot-chat"
-  force_destroy = true
+data "terraform_remote_state" "oob" {
+  backend = "local"
+  config = {
+    path = "oob/terraform.tfstate"
+  }
 }
 
 # Create an SQS queue
@@ -56,7 +57,7 @@ resource "aws_iam_role_policy" "chat_service_policy" {
           "s3:GetObject"
         ],
         Resource = [
-          "${aws_s3_bucket.chat_service_bucket.arn}/*"
+          "${data.terraform_remote_state.oob.outputs.bucket_arn}/*"
         ]
       },
       {
@@ -110,8 +111,4 @@ resource "aws_security_group" "chat_service_sg" {
 # Output the SQS queue URL and S3 bucket name
 output "sqs_queue_url" {
   value = aws_sqs_queue.chat_service_queue.id
-}
-
-output "s3_bucket_name" {
-  value = aws_s3_bucket.chat_service_bucket.bucket
 }

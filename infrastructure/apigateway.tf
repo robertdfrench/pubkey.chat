@@ -116,7 +116,7 @@ resource "aws_api_gateway_integration" "get_message" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/messages/{name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${data.terraform_remote_state.oob.outputs.bucket_name}/messages/{name}"
   request_parameters = {
     "integration.request.path.name" = "method.request.path.name"
   }
@@ -130,7 +130,7 @@ resource "aws_api_gateway_integration" "get_topic" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/topics/{name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${data.terraform_remote_state.oob.outputs.bucket_name}/topics/{name}"
   request_parameters = {
     "integration.request.path.name" = "method.request.path.name"
   }
@@ -144,7 +144,7 @@ resource "aws_api_gateway_integration" "get_asset" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/assets/{name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${data.terraform_remote_state.oob.outputs.bucket_name}/assets/{name}"
   request_parameters = {
     "integration.request.path.name" = "method.request.path.name"
   }
@@ -158,7 +158,7 @@ resource "aws_api_gateway_integration" "get_root" {
 
   integration_http_method = "GET"
   type                    = "AWS"
-  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${aws_s3_bucket.chat_service_bucket.id}/index.html"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:s3:path/${data.terraform_remote_state.oob.outputs.bucket_name}/index.html"
 }
 
 resource "aws_api_gateway_method_response" "get_message_200" {
@@ -391,7 +391,7 @@ resource "aws_iam_policy" "api_gateway_sqs_policy" {
       {
         Effect   = "Allow",
         Action   = "s3:GetObject",
-        Resource = "${aws_s3_bucket.chat_service_bucket.arn}/*"
+        Resource = "${data.terraform_remote_state.oob.outputs.bucket_arn}/*"
       }
     ]
   })
