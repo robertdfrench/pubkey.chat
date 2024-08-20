@@ -38,3 +38,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: make test_client
+
+  all:
+    needs: lint-infrastructure macos linux
