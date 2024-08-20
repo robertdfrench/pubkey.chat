@@ -41,3 +41,6 @@ jobs:
 
   all:
     needs: lint-infrastructure macos linux
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo done
