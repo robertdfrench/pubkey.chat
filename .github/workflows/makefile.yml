@@ -40,7 +40,7 @@ jobs:
     - run: make test_client
 
   all:
-    needs: lint-infrastructure macos linux
+    needs: [lint-infrastructure, macos, linux]
     runs-on: ubuntu-latest
     steps:
       - run: echo done
