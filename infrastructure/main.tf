@@ -14,7 +14,7 @@ data "aws_ami" "packer_ami" {
 data "terraform_remote_state" "oob" {
   backend = "local"
   config = {
-    path = "dns/terraform.tfstate"
+    path = "oob/terraform.tfstate"
   }
 }
 
