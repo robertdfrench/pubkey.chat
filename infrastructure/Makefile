@@ -1,7 +1,9 @@
 include ../common.mk
 
-test: #: Run a fake test
-	@echo "okay!"
+test: build/tf_init #: Run a fake test
+	make -C dns test
+	terraform fmt -diff
+	terraform validate
 
 apply: build/tf_init #: Create AWS Resources
 	make -C image ami

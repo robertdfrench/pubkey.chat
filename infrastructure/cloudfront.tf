@@ -13,11 +13,11 @@ resource "aws_cloudfront_distribution" "api_distribution" {
       replace(
         aws_api_gateway_deployment.chat.invoke_url,
         "https://",
-        ""),
+      ""),
       "/",
-      "")
+    "")
     origin_id   = "APIGateway"
-    origin_path = "/prod"  # Add this line to specify the stage
+    origin_path = "/prod" # Add this line to specify the stage
 
     custom_origin_config {
       http_port              = 80
@@ -101,7 +101,7 @@ resource "aws_cloudfront_distribution" "api_distribution" {
 
   viewer_certificate {
     acm_certificate_arn = aws_acm_certificate.cert.arn
-    ssl_support_method = "sni-only"
+    ssl_support_method  = "sni-only"
   }
 
 }
