@@ -7,51 +7,24 @@ on:
     branches: [ "trunk" ]
 
 jobs:
-  test-ubuntu-20.04:
-    runs-on: ubuntu-20.04
+  linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04]
     steps:
     - uses: actions/checkout@v4
-    - name: Run Tests
-      run: make test
-  test-ubuntu-22.04:
-    runs-on: ubuntu-22.04
-    steps:
-    - uses: actions/checkout@v4
-    - name: Run Tests
-      run: make test
-  test-ubuntu-24.04:
-    runs-on: ubuntu-24.04
-    steps:
-    - uses: actions/checkout@v4
-    - name: Run Tests
-      run: make test
-  test-macos-12:
-    runs-on: macos-12
+    - run: make test
+
+  macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-12, macos-13, macos-14]
     steps:
     - uses: actions/checkout@v4
     - name: Install Terraform
       run: |
         brew tap hashicorp/tap
         brew install hashicorp/tap/terraform
-    - name: Run Tests
-      run: make test
-  test-macos-13:
-    runs-on: macos-13
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install Terraform
-      run: |
-        brew tap hashicorp/tap
-        brew install hashicorp/tap/terraform
-    - name: Run Tests
-      run: make test
-  test-macos-14:
-    runs-on: macos-14
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install Terraform
-      run: |
-        brew tap hashicorp/tap
-        brew install hashicorp/tap/terraform
-    - name: Run Tests
-      run: make test
+    - run: make test
