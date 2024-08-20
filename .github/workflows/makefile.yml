@@ -1,4 +1,4 @@
-name: Makefile CI
+name: Lint and Test
 
 on:
   push:
@@ -17,5 +17,9 @@ jobs:
     runs-on: macos-12
     steps:
     - uses: actions/checkout@v4
+    - name: Install Terraform
+      run: |
+        brew tap hashicorp/tap
+        brew install hashicorp/tap/terraform
     - name: Run Tests
       run: make test

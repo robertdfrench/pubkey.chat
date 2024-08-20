@@ -13,7 +13,7 @@ data "aws_ami" "packer_ami" {
 
 # Create an S3 bucket
 resource "aws_s3_bucket" "chat_service_bucket" {
-  bucket = "objects-dot-pubkey-dot-chat"
+  bucket        = "objects-dot-pubkey-dot-chat"
   force_destroy = true
 }
 
@@ -42,8 +42,8 @@ resource "aws_iam_role" "chat_service_role" {
 
 # Attach policy to IAM role
 resource "aws_iam_role_policy" "chat_service_policy" {
-  name   = "chat_service_policy"
-  role   = aws_iam_role.chat_service_role.id
+  name = "chat_service_policy"
+  role = aws_iam_role.chat_service_role.id
 
   policy = jsonencode({
     Version = "2012-10-17",
@@ -90,7 +90,7 @@ resource "aws_iam_instance_profile" "chat_service_instance_profile" {
 # Create a security group for the EC2 instance
 resource "aws_security_group" "chat_service_sg" {
   name_prefix = "chat-service-sg"
-  vpc_id      = data.aws_vpc.default.id  # You'll need to create a VPC resource
+  vpc_id      = data.aws_vpc.default.id # You'll need to create a VPC resource
 
   ingress {
     from_port   = 22

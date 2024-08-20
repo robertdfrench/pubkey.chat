@@ -95,7 +95,7 @@ resource "aws_api_gateway_integration" "create_message" {
   credentials = aws_iam_role.api_gateway_sqs_role.arn
 
   integration_http_method = "POST"
-  uri = "arn:aws:apigateway:${data.aws_region.current.name}:sqs:path/${aws_sqs_queue.chat_service_queue.name}"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:sqs:path/${aws_sqs_queue.chat_service_queue.name}"
 
   request_parameters = {
     "integration.request.header.Content-Type" = "'application/x-www-form-urlencoded'"
@@ -384,13 +384,13 @@ resource "aws_iam_policy" "api_gateway_sqs_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect = "Allow",
-        Action = "sqs:SendMessage",
+        Effect   = "Allow",
+        Action   = "sqs:SendMessage",
         Resource = aws_sqs_queue.chat_service_queue.arn
       },
       {
-        Effect = "Allow",
-        Action = "s3:GetObject",
+        Effect   = "Allow",
+        Action   = "s3:GetObject",
         Resource = "${aws_s3_bucket.chat_service_bucket.arn}/*"
       }
     ]
