@@ -1,24 +1,16 @@
-include ../common.mk
+include ../lib/common.mk
+include ../lib/tf.mk
 
-test: build/tf_init #: Run a fake test
+test: tf_lint #: Lint
 	make -C dns test
-	terraform fmt -diff
-	terraform validate
 
-apply: build/tf_init #: Create AWS Resources
+apply: ami oob terraform.tfstate #: Create AWS Resources
+
+ami:
 	make -C image ami
+
+oob:
 	make -C dns apply
-	terraform apply -auto-approve
-
-plan: build/tf_init #: Review a plan before applying it
-	terraform plan
-
-destroy: build/tf_init #: Destroy terraform infrastructure
-	terraform destroy -auto-approve
-
-build/tf_init: providers.tf build/.dir
-	terraform init
-	touch $@
 
 clean: clean_build #: Clean up intermediate artifacts
 	make -C image clean

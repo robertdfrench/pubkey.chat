@@ -1,4 +1,5 @@
-include common.mk
+include lib/common.mk
+include lib/venv.mk
 
 deploy: test #: Deploy to production
 	$(MAKE) -C infrastructure apply

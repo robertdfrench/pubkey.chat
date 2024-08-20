@@ -1,9 +1,11 @@
-include ../../common.mk
+include ../../lib/common.mk
+include ../../lib/venv.mk
 
 SOURCES = chat.service provisioner.sh build/pubkey.chat packer.pkr.hcl
 
-test: #: Run a fake test
-	@echo "okay!"
+test: build/variables.pkrvars.hcl #: Run a fake test
+	packer fmt -diff .
+	packer validate -var-file=$< .
 
 ami: build/ami_name.txt update_ami_cache #: Build the latest AMI
 	make build/amis/`cat $<`

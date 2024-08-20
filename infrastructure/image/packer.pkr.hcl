@@ -17,8 +17,8 @@ locals {
 }
 
 source "amazon-ebs" "us-east-1" {
-  region        = "us-east-1"
-  source_ami    = "ami-0427090fd1714168b" 
+  region     = "us-east-1"
+  source_ami = "ami-0427090fd1714168b"
 
   instance_type = local.instance_type
   ssh_username  = local.ssh_username
@@ -31,12 +31,12 @@ build {
   ]
 
   provisioner "file" {
-    source = "chat.service"
+    source      = "chat.service"
     destination = "chat.service"
   }
 
   provisioner "file" {
-    source = "build/pubkey.chat"
+    source      = "build/pubkey.chat"
     destination = "pubkey.chat"
   }
 
@@ -45,7 +45,7 @@ build {
   }
 
   post-processor "manifest" {
-    output      = "build/manifest.json"
-    strip_path  = true
+    output     = "build/manifest.json"
+    strip_path = true
   }
 }

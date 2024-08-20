@@ -12,7 +12,7 @@ resource "aws_launch_template" "chat_service" {
       #!/bin/bash
       echo "[DEFAULT]" > /etc/chat.ini
       echo "queue_name=${aws_sqs_queue.chat_service_queue.name}" >> /etc/chat.ini
-      echo "bucket_name=${aws_s3_bucket.chat_service_bucket.bucket}" >> /etc/chat.ini
+      echo "bucket_name=${data.terraform_remote_state.oob.outputs.bucket_name}" >> /etc/chat.ini
       echo "table_name=${aws_dynamodb_table.locking_table.name}" >> /etc/chat.ini
       echo "region=${data.aws_region.current.name}" >> /etc/chat.ini
       systemctl enable chat.service

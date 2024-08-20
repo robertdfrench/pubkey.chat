@@ -1,13 +1,5 @@
 venv=. .venv/bin/activate &&
 
-help: #: Print this help message
-	@cat $(MAKEFILE_LIST) \
-		| grep '#' \
-		| grep ':' \
-		| awk -F':' '{ OFS="\t"; print $$1, "-", $$3 }' \
-		| column -s"	" -t \
-		| sort
-
 freeze: .venv/ready #: Freeze the current requirements
 	$(venv) pip freeze > dev-requirements.txt
 
@@ -23,9 +15,5 @@ freeze: .venv/ready #: Freeze the current requirements
 	python3 -m venv .venv
 	touch $@
 
-clean_build:
-	rm -rf build .venv
-
-%/.dir:
-	mkdir -p $*
-	touch $@
+clean_venv:
+	rm -rf .venv

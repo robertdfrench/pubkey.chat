@@ -1,26 +1,11 @@
-include ../../common.mk
+include ../../lib/common.mk
+include ../../lib/tf.mk
 
-test: build/tf_init #: Run a fake test
-	terraform fmt -diff
-	terraform validate
+test: tf_lint #: Validate terraform config
 
-apply: build/nameservers #: Create AWS Resources
+apply: terraform.tfstate build/nameservers #: Create AWS Resources
 
-plan: build/tf_init #: Review a plan before applying it
-	terraform plan
-
-destroy: build/tf_init #: Destroy terraform infrastructure
-	terraform destroy
-
-build/tf_init: providers.tf build/.dir
-	terraform init
-	touch $@
-
-build/zone: build/tf_init
-	terraform apply -auto-approve
-	touch $@
-
-build/nameservers: build/zone
+build/nameservers: build/.dir terraform.tfstate
 	@echo Run 'touch build/nameservers' if you have added
 	@echo all of the zone\'s nameservers at the registrar.
 	@exit 1
