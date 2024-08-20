@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install Terraform
-      run: apt install terraform
+      run: sudo apt-get install terraform
     - run: make test
 
   macos:
