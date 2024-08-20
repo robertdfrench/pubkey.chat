@@ -7,11 +7,8 @@ on:
     branches: [ "trunk" ]
 
 jobs:
-  linux:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
+  lint-infrastructure:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Install HashiCorp Tools
@@ -21,7 +18,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install terraform
         sudo apt-get install packer
-    - run: make test
+    - name: Lint Infrastructure
+      run: make test_infrastructure
+
+  linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
+    steps:
+    - uses: actions/checkout@v4
+    - run: make test_client
 
   macos:
     runs-on: ${{ matrix.os }}
@@ -30,9 +37,4 @@ jobs:
         os: [macos-12, macos-13, macos-14]
     steps:
     - uses: actions/checkout@v4
-    - name: Install HashiCorp Tools
-      run: |
-        brew tap hashicorp/tap
-        brew install hashicorp/tap/terraform
-        brew install hashicorp/tap/packer
-    - run: make test
+    - run: make test_client
