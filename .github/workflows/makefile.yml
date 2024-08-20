@@ -7,19 +7,29 @@ on:
     branches: [ "trunk" ]
 
 jobs:
-  test-linux:
-    runs-on: ubuntu-20.04
+  linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
     steps:
     - uses: actions/checkout@v4
-    - name: Run Tests
-      run: make test
-  test-macos:
-    runs-on: macos-12
+    - name: Install Terraform
+      run: |
+        wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt update && sudo apt install terraform
+    - run: make test
+
+  macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-12, macos-13, macos-14]
     steps:
     - uses: actions/checkout@v4
     - name: Install Terraform
       run: |
         brew tap hashicorp/tap
         brew install hashicorp/tap/terraform
-    - name: Run Tests
-      run: make test
+    - run: make test
