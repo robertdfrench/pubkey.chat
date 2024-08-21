@@ -107,8 +107,3 @@ resource "aws_security_group" "chat_service_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
-
-# Output the SQS queue URL and S3 bucket name
-output "sqs_queue_url" {
-  value = aws_sqs_queue.chat_service_queue.id
-}

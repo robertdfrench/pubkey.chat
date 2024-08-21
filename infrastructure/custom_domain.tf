@@ -1,5 +1,5 @@
 data "aws_route53_zone" "main" {
-  name = "pubkey.chat."
+  name = data.terraform_remote_state.oob.outputs.domain_name
 }
 
 resource "aws_acm_certificate" "cert" {
