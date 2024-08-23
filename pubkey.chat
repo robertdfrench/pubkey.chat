@@ -179,6 +179,7 @@ def chat_main(chat_config: pathlib.Path, topic: 'Topic'):  # pragma: no cover
             # could not be posted.
             try:
                 client.post_message(msg)
+                subscription.reset_exponent()
             except urllib.error.HTTPError as e:
                 ui.chatbuffer_add(f"[pubkey.chat]: {e}")
 
@@ -1264,6 +1265,7 @@ class TopicSubscription:  # pragma: no cover
     ui: 'ChatUI'
     ptr: 'ChatPointer'
     client: 'ChatAPIClient'
+    e: int = 0
 
     def __call__(self):
         """
@@ -1276,22 +1278,25 @@ class TopicSubscription:  # pragma: no cover
         polling over something more sophisticated like WebSockets.
         This tradeoff is made for simplicity of the client code.
         """
-        e = 0
+        self.e = 0
         while True:
-            time.sleep(1.5 ** e)
+            time.sleep(1.5 ** self.e)
             if self.update():
                 # Something changed, so the conversation may be
                 # active. Raise the polling frequency so that we get
                 # new updates as soon as possible.
-                e = 1
+                self.reset_exponent()
             else:
                 # Nothing changed since the last time, so we decrease
                 # the polling frequency in order to reduce load on the
                 # pubkey.chat infrastructure. (Click 'Sponsor' on
                 # https://github.com/robertdfrench/pubkey.chat to help
                 # defray infrastructure costs! Thank you!!)
-                if e <= 10:
-                    e += 1
+                if self.e <= 10:
+                    self.e += 1
+
+    def reset_exponent(self):
+        self.e = 1
 
     def update(self) -> bool:
         """
@@ -1303,15 +1308,27 @@ class TopicSubscription:  # pragma: no cover
         topic, just like a branch in git. So `head` and `parent`
         represent the message id contained in this topic file.
         """
-        head = self.client.get_head(self.topic)
-        if self.ptr.update_parent(head):
-            message = self.client.get_message(self.ptr.parent)
-            if message:
-                username = str(message.profile)
-                text = message.interior().text
-                self.ui.chatbuffer_add(f"{username}: {text}")
-                return True
-        return False
+        original_head = self.client.get_head(self.topic)
+        head = original_head
+        backlog = []
+        while self.ptr.parent != head:
+            message = self.client.get_message(head)
+            if not message:
+                raise Exception(f"Message [{head}] unavailable")
+            backlog.append(message)
+            if len(backlog) > 100:  # pragma: no cover
+                break
+            head = message.interior().parent
+
+        self.ptr.update_parent(original_head)
+        backlog.reverse()
+
+        for message in backlog:
+            username = str(message.profile)
+            text = message.interior().text
+            self.ui.chatbuffer_add(f"{username}: {text}")
+
+        return len(backlog) > 0
 
 
 if __name__ == "__main__":  # pragma: no cover
