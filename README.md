@@ -10,7 +10,7 @@ SSH key, and all incoming messages are verified against the author's
 pubkeys. Every GitHub user's ssh pubkeys are [publicly
 available](https://github.com/robertdfrench.keys).
 
-![](websites/screengrab.gif)
+![](website/screengrab.gif)
 
 ## Architecture
 
