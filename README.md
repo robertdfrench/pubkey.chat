@@ -14,30 +14,29 @@ available](https://github.com/robertdfrench.keys).
 
 ## Architecture
 
-### Validating Messages
+### Sending and Receiving Messages
 Every message is signed with your SSH private key, and then posted in a
 public place. Your friends can verify these messages came from you by
-checking the signature against your SSH public keys on GitHub.
+checking the signature against your SSH public keys on GitHub. See
+[WMAP](https://github.com/robertdfrench/wmap) for more information on
+signing and verification.
 
 ```mermaid
-flowchart TD
-    subgraph Alice's Chat Client
-        MT('Hello, Bob!')
-        AKP(SSH KeyPair)
-        ASM(Signed Message)
+sequenceDiagram
+    participant GitHub
+    participant Pubkey.Chat
+    participant Alice
+    participant Bob
+    Alice->>GitHub: Upload SSH Pubkey
+    note over Alice: sign message with <br/> SSH Private Key
+    Alice->>Pubkey.Chat: POST to TOPIC
+    loop Polling
+    Bob->>+Pubkey.Chat: GET latest message for TOPIC
     end
-
-    AGH(github.com/alice.keys)
-
-    ASM --> PSM[pubkey.chat/messages/abc123]
-
-    subgraph Bob's Chat Client
-        VM["'Hello, Bob!' <br/> (Verified from Alice)"]
-    end
-    
-    MT --> ASM
-    AKP -->|pubkey| AGH
-    AKP -->ASM
-    PSM --> VM
-    AGH --> VM
+    Pubkey.Chat->>-Bob: New Message from Alice
+    Bob->>GitHub: GET Alice's SSH Pubkey
+    note over Bob: Verify message against <br/> Alice's SSH Pubkey
 ```
+
+For the sake of keeping the code simple and easy to auditable, the
+client polls for new messages using repeated HTTP GET queries.
